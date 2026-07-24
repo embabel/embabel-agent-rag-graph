@@ -15,32 +15,30 @@
  */
 package com.embabel.agent.rag.graph.dialect
 
-import com.embabel.agent.rag.graph.model.FalkorDbIndexInfo
-import io.mockk.every
-import io.mockk.mockk
-import io.mockk.slot
-import io.mockk.verify
 import org.drivine.connection.DatabaseType
-import org.drivine.manager.PersistenceManager
-import org.drivine.query.QuerySpecification
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
+/**
+ * Unit coverage for the [RagDialect] resolution and the per-engine search/embedding Cypher templates.
+ *
+ * Schema creation is no longer part of [RagDialect] (it is handled by Drivine's schema managers), so
+ * there are no index/constraint-DDL assertions here — the real end-to-end schema + search behaviour
+ * is exercised by the cross-engine `*RagSearchCharacterizationTest`s.
+ */
 class RagDialectTest {
 
     @Test
     fun `forDatabaseType resolves Neo4j`() {
-        val dialect = RagDialect.forDatabaseType(DatabaseType.NEO4J)
-        assertTrue(dialect is Neo4jRagDialect)
+        assertTrue(RagDialect.forDatabaseType(DatabaseType.NEO4J) is Neo4jRagDialect)
     }
 
     @Test
     fun `forDatabaseType resolves FalkorDB`() {
-        val dialect = RagDialect.forDatabaseType(DatabaseType.FALKORDB)
-        assertTrue(dialect is FalkorDbRagDialect)
+        assertTrue(RagDialect.forDatabaseType(DatabaseType.FALKORDB) is FalkorDbRagDialect)
     }
 
     @Test
@@ -52,52 +50,12 @@ class RagDialectTest {
 
     @Test
     fun `forDatabaseType resolves Memgraph`() {
-        val dialect = RagDialect.forDatabaseType(DatabaseType.MEMGRAPH)
-        assertTrue(dialect is MemgraphRagDialect)
+        assertTrue(RagDialect.forDatabaseType(DatabaseType.MEMGRAPH) is MemgraphRagDialect)
     }
 
     @Nested
     inner class Neo4j {
         private val dialect = Neo4jRagDialect()
-        private val pm = mockk<PersistenceManager>(relaxed = true)
-
-        @Test
-        fun `creates vector index with IF NOT EXISTS`() {
-            val spec = slot<QuerySpecification<*>>()
-            every { pm.execute(capture(spec)) } returns Unit
-
-            dialect.createVectorIndex(pm, "idx", "Chunk", 384, "cosine")
-
-            verify(exactly = 1) { pm.execute(any()) }
-            val cypher = spec.captured.statement!!.text
-            assertTrue(cypher.contains("CREATE VECTOR INDEX `idx` IF NOT EXISTS"))
-            assertTrue(cypher.contains("`vector.dimensions`: 384"))
-            assertTrue(cypher.contains("`vector.similarity_function`: 'cosine'"))
-        }
-
-        @Test
-        fun `creates fulltext index`() {
-            val spec = slot<QuerySpecification<*>>()
-            every { pm.execute(capture(spec)) } returns Unit
-
-            dialect.createFullTextIndex(pm, "idx", "Chunk", listOf("text"))
-
-            val cypher = spec.captured.statement!!.text
-            assertTrue(cypher.contains("CREATE FULLTEXT INDEX `idx` IF NOT EXISTS"))
-            assertTrue(cypher.contains("ON EACH [n.text]"))
-        }
-
-        @Test
-        fun `creates unique constraint`() {
-            val spec = slot<QuerySpecification<*>>()
-            every { pm.execute(capture(spec)) } returns Unit
-
-            dialect.createUniqueConstraint(pm, "Entity", "id")
-
-            val cypher = spec.captured.statement!!.text
-            assertTrue(cypher.contains("CREATE CONSTRAINT `entity_id_unique` IF NOT EXISTS"))
-            assertTrue(cypher.contains("REQUIRE n.id IS UNIQUE"))
-        }
 
         @Test
         fun `chunk vector search uses db_index_vector_queryNodes`() {
@@ -131,71 +89,18 @@ class RagDialectTest {
     inner class FalkorDB {
         private val dialect = FalkorDbRagDialect()
 
-        private fun pmWithNoIndexes(): PersistenceManager {
-            val pm = mockk<PersistenceManager>(relaxed = true)
-            every { pm.query<Any>(any()) } returns emptyList()
-            return pm
-        }
-
-        private fun pmWithExistingIndex(label: String, property: String, type: String): PersistenceManager {
-            val pm = mockk<PersistenceManager>(relaxed = true)
-            val indexInfo = FalkorDbIndexInfo(
-                label = label,
-                properties = listOf(property),
-                types = mapOf(property to listOf(type)),
-            )
-            every { pm.query<Any>(any()) } returns listOf(indexInfo)
-            return pm
-        }
-
-        @Test
-        fun `creates vector index when none exists`() {
-            val pm = pmWithNoIndexes()
-            dialect.createVectorIndex(pm, "idx", "Chunk", 384, "cosine")
-            verify(exactly = 1) { pm.execute(match { it.statement?.text?.contains("CREATE VECTOR INDEX") == true }) }
-        }
-
-        @Test
-        fun `skips vector index when already exists`() {
-            val pm = pmWithExistingIndex("Chunk", "embedding", "VECTOR")
-            dialect.createVectorIndex(pm, "idx", "Chunk", 384, "cosine")
-            verify(exactly = 0) { pm.execute(any()) }
-        }
-
-        @Test
-        fun `creates fulltext index when none exists`() {
-            val pm = pmWithNoIndexes()
-            dialect.createFullTextIndex(pm, "idx", "Chunk", listOf("text"))
-            verify(exactly = 1) { pm.execute(match { it.statement?.text?.contains("createNodeIndex") == true }) }
-        }
-
-        @Test
-        fun `skips fulltext index when already exists`() {
-            val pm = pmWithExistingIndex("Chunk", "text", "FULLTEXT")
-            dialect.createFullTextIndex(pm, "idx", "Chunk", listOf("text"))
-            verify(exactly = 0) { pm.execute(any()) }
-        }
-
-        @Test
-        fun `creates fulltext index for each property`() {
-            val pm = pmWithNoIndexes()
-            dialect.createFullTextIndex(pm, "idx", "Entity", listOf("name", "description"))
-            verify(exactly = 2) { pm.execute(any()) }
-        }
-
-        @Test
-        fun `unique constraint logs warning and does not execute`() {
-            val pm = mockk<PersistenceManager>(relaxed = true)
-            dialect.createUniqueConstraint(pm, "Entity", "id")
-            verify(exactly = 0) { pm.execute(any()) }
-        }
-
         @Test
         fun `chunk vector search uses db_idx_vector_queryNodes with vecf32`() {
             val cypher = dialect.chunkVectorSearchCypher()
             assertTrue(cypher.contains("db.idx.vector.queryNodes"))
             assertTrue(cypher.contains("vecf32"))
             assertTrue(cypher.contains("\$chunkLabel"))
+        }
+
+        @Test
+        fun `chunk vector search converts distance to similarity`() {
+            val cypher = dialect.chunkVectorSearchCypher()
+            assertTrue(cypher.contains("1.0 - score"))
         }
 
         @Test
@@ -214,9 +119,14 @@ class RagDialectTest {
         }
 
         @Test
-        fun `store embedding uses property set`() {
+        fun `embedding literal wraps vecf32 for storage`() {
+            assertTrue(dialect.embeddingLiteral("embedding") == "vecf32(\$embedding)")
+        }
+
+        @Test
+        fun `store embedding wraps value in vecf32`() {
             val cypher = dialect.storeEmbeddingCypher("Chunk:ContentElement")
-            assertTrue(cypher.contains("SET n.embedding"))
+            assertTrue(cypher.contains("SET n.embedding = vecf32(\$embedding)"))
             assertTrue(cypher.contains("\$embeddedText"))
             assertTrue(cypher.contains("REMOVE n._text"))
             assertTrue(cypher.contains("SET n._text"))
@@ -234,50 +144,16 @@ class RagDialectTest {
         }
 
         @Test
-        fun `creates vector index with cosine mapped to cos`() {
-            val pm = mockk<PersistenceManager>(relaxed = true)
-            every { pm.query<Any>(any()) } returns emptyList()
-            val spec = slot<QuerySpecification<*>>()
-            every { pm.execute(capture(spec)) } returns Unit
-
-            dialect.createVectorIndex(pm, "idx", "Chunk", 384, "cosine")
-
-            val cypher = spec.captured.statement!!.text
-            assertTrue(cypher.contains("CREATE VECTOR INDEX idx ON :Chunk(embedding)"))
-            assertTrue(cypher.contains("dimension: 384"))
-            assertTrue(cypher.contains("metric: \"cos\""))
-        }
-
-        @Test
-        fun `creates fulltext index`() {
-            val pm = mockk<PersistenceManager>(relaxed = true)
-            val spec = slot<QuerySpecification<*>>()
-            every { pm.execute(capture(spec)) } returns Unit
-
-            dialect.createFullTextIndex(pm, "idx", "Chunk", listOf("text"))
-
-            val cypher = spec.captured.statement!!.text
-            assertTrue(cypher.contains("CREATE TEXT INDEX idx ON :Chunk(text)"))
-        }
-
-        @Test
-        fun `creates unique constraint`() {
-            val pm = mockk<PersistenceManager>(relaxed = true)
-            val spec = slot<QuerySpecification<*>>()
-            every { pm.execute(capture(spec)) } returns Unit
-
-            dialect.createUniqueConstraint(pm, "Entity", "id")
-
-            val cypher = spec.captured.statement!!.text
-            assertTrue(cypher.contains("CREATE CONSTRAINT"))
-            assertTrue(cypher.contains("n.id IS UNIQUE"))
-        }
-
-        @Test
         fun `chunk vector search uses vector_search_search`() {
             val cypher = dialect.chunkVectorSearchCypher()
             assertTrue(cypher.contains("vector_search.search"))
             assertTrue(cypher.contains("similarity AS score"))
+        }
+
+        @Test
+        fun `chunk vector search projects with WITH before WHERE`() {
+            val cypher = dialect.chunkVectorSearchCypher()
+            assertTrue(cypher.contains("WITH chunk, score"))
         }
 
         @Test

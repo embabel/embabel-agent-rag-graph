@@ -15,65 +15,16 @@
  */
 package com.embabel.agent.rag.graph.dialect
 
-import org.drivine.manager.PersistenceManager
-import org.drivine.query.QuerySpecification
-
 /**
  * Neo4j RAG dialect implementation.
  *
- * Uses Neo4j-native vector index (`CREATE VECTOR INDEX`), fulltext index
- * (`CREATE FULLTEXT INDEX`), unique constraints, and the `db.index.vector.queryNodes`
- * / `db.index.fulltext.queryNodes` procedures.
+ * Uses the `db.index.vector.queryNodes` / `db.index.fulltext.queryNodes` procedures for search and
+ * stores embeddings as a plain node property. Schema creation is handled by Drivine's schema
+ * managers (see [com.embabel.agent.rag.graph.DrivineStore.provision]).
  */
 class Neo4jRagDialect : RagDialect {
 
     override val name = "Neo4j"
-
-    override fun createVectorIndex(
-        persistenceManager: PersistenceManager,
-        name: String,
-        label: String,
-        dimensions: Int,
-        similarityFunction: String,
-    ) {
-        persistenceManager.execute(QuerySpecification.withStatement(
-            """
-            CREATE VECTOR INDEX `$name` IF NOT EXISTS
-            FOR (n:$label) ON (n.embedding)
-            OPTIONS {indexConfig: {
-            `vector.dimensions`: $dimensions,
-            `vector.similarity_function`: '$similarityFunction'
-            }}""".trimIndent()
-        ))
-    }
-
-    override fun createFullTextIndex(
-        persistenceManager: PersistenceManager,
-        name: String,
-        label: String,
-        properties: List<String>,
-    ) {
-        val propertiesString = properties.joinToString(", ") { "n.$it" }
-        persistenceManager.execute(QuerySpecification.withStatement(
-            """
-            CREATE FULLTEXT INDEX `$name` IF NOT EXISTS
-            FOR (n:$label) ON EACH [$propertiesString]
-            OPTIONS {indexConfig: {}}""".trimIndent()
-        ))
-    }
-
-    override fun createUniqueConstraint(
-        persistenceManager: PersistenceManager,
-        label: String,
-        property: String,
-    ) {
-        val constraintName = "${label}_${property}_unique".lowercase()
-        persistenceManager.execute(QuerySpecification.withStatement(
-            """
-            CREATE CONSTRAINT `$constraintName` IF NOT EXISTS
-            FOR (n:$label) REQUIRE n.$property IS UNIQUE""".trimIndent()
-        ))
-    }
 
     override fun chunkVectorSearchCypher(): String = """
         CALL db.index.vector.queryNodes(${'$'}vectorIndex, ${'$'}topK, ${'$'}queryVector)

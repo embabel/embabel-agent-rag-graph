@@ -18,7 +18,10 @@
 
     <properties>
         <embabel-agent.version>1.5.0-SNAPSHOT</embabel-agent.version>
-        <drivine.version>0.0.38</drivine.version>
+        <drivine.version>0.0.73</drivine.version>
+        <!-- Overrides the parent's default: the Drivine KSP-generated DSL uses context parameters
+             (Kotlin 2.2+), so this module and its codegen-gradle build compile with 2.3.21. -->
+        <kotlin.version>2.3.21</kotlin.version>
     </properties>
 
     <dependencyManagement>
@@ -136,9 +139,83 @@
 
     <build>
         <plugins>
+            <!-- Run the Gradle KSP sub-build to generate the Drivine query DSL (KSP is Gradle-first). -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>gradle-ksp-codegen</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <!-- Unix gradlew. On Windows this needs codegen-gradle/gradlew.bat (shipped);
+                                 a fully portable build would OS-switch this <executable> via a profile. -->
+                            <executable>${project.basedir}/codegen-gradle/gradlew</executable>
+                            <workingDirectory>${project.basedir}/codegen-gradle</workingDirectory>
+                            <!-- Pass the pom's versions to the Gradle codegen so it generates the DSL
+                                 against the same drivine / embabel this module compiles against (pom is
+                                 the single source of truth; the gradle build has fallbacks for standalone runs). -->
+                            <arguments>
+                                <argument>kspKotlin</argument>
+                                <argument>-PdrivineVersion=${drivine.version}</argument>
+                                <argument>-PembabelAgentVersion=${embabel-agent.version}</argument>
+                                <argument>--quiet</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- `mvn clean` also removes the Gradle codegen output. `codegen-gradle/build/` is gitignored
+                 and off Maven's default clean path, so without this a stale generated DSL can linger. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <configuration>
+                    <filesets>
+                        <fileset>
+                            <directory>${project.basedir}/codegen-gradle/build</directory>
+                        </fileset>
+                    </filesets>
+                </configuration>
+            </plugin>
+
+            <!-- Register the Gradle-generated DSL sources with the Maven build. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>add-ksp-generated-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.basedir}/codegen-gradle/build/generated/ksp/main/kotlin</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>org.jetbrains.kotlin</groupId>
                 <artifactId>kotlin-maven-plugin</artifactId>
+                <version>${kotlin.version}</version>
+                <configuration>
+                    <args>
+                        <arg>-Xjsr305=strict</arg>
+                        <arg>-Xskip-metadata-version-check</arg>
+                        <arg>-Xcontext-parameters</arg>
+                    </args>
+                </configuration>
                 <executions>
                     <execution>
                         <id>compile</id>
@@ -148,8 +225,9 @@
                         </goals>
                         <configuration>
                             <sourceDirs>
-                                <source>src/main/java</source>
-                                <source>src/main/kotlin</source>
+                                <sourceDir>src/main/java</sourceDir>
+                                <sourceDir>src/main/kotlin</sourceDir>
+                                <sourceDir>${project.basedir}/codegen-gradle/build/generated/ksp/main/kotlin</sourceDir>
                             </sourceDirs>
                         </configuration>
                     </execution>
@@ -161,8 +239,8 @@
                         </goals>
                         <configuration>
                             <sourceDirs>
-                                <source>src/test/java</source>
-                                <source>src/test/kotlin</source>
+                                <sourceDir>src/test/java</sourceDir>
+                                <sourceDir>src/test/kotlin</sourceDir>
                             </sourceDirs>
                         </configuration>
                     </execution>

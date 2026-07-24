@@ -16,14 +16,15 @@
 package com.embabel.agent.rag.graph.dialect
 
 import org.drivine.connection.DatabaseType
-import org.drivine.manager.PersistenceManager
 
 /**
  * Strategy interface for database-specific RAG operations.
  *
  * Implementations encapsulate the Cypher dialect differences between Neo4j,
- * FalkorDB, and Memgraph for vector indexing, search, fulltext indexing,
- * constraint creation, and embedding storage.
+ * FalkorDB, and Memgraph for vector/fulltext search, embedding storage, and the
+ * per-engine vector literal. Schema creation itself is handled by Drivine's
+ * [org.drivine.schema.IndexManager] / [org.drivine.schema.ConstraintManager]
+ * (see [com.embabel.agent.rag.graph.DrivineStore.provision]), not this interface.
  *
  * Resolve the appropriate dialect from Drivine's [DatabaseType] via
  * [RagDialect.forDatabaseType].
@@ -31,42 +32,6 @@ import org.drivine.manager.PersistenceManager
 interface RagDialect {
 
     val name: String
-
-    /**
-     * Create a vector index if one does not already exist.
-     *
-     * Neo4j uses `CREATE VECTOR INDEX ... IF NOT EXISTS`.
-     * FalkorDB checks `db.indexes()` before creating.
-     */
-    fun createVectorIndex(
-        persistenceManager: PersistenceManager,
-        name: String,
-        label: String,
-        dimensions: Int,
-        similarityFunction: String,
-    )
-
-    /**
-     * Create a fulltext index if one does not already exist.
-     */
-    fun createFullTextIndex(
-        persistenceManager: PersistenceManager,
-        name: String,
-        label: String,
-        properties: List<String>,
-    )
-
-    /**
-     * Create a unique constraint if possible.
-     *
-     * FalkorDB uses a Redis command (`GRAPH.CONSTRAINT CREATE`) rather than Cypher;
-     * implementations that cannot express this should log the limitation.
-     */
-    fun createUniqueConstraint(
-        persistenceManager: PersistenceManager,
-        label: String,
-        property: String,
-    )
 
     /**
      * Returns the Cypher query template for chunk vector search.
@@ -117,6 +82,18 @@ interface RagDialect {
      * Expected parameters: `$id`, `$embedding`, `$embeddingModel`, `$embeddedText`.
      */
     fun storeEmbeddingCypher(labels: String): String
+
+    /**
+     * The right-hand side expression for assigning an embedding parameter to a node property.
+     *
+     * FalkorDB requires the vector be wrapped in `vecf32(...)` for its vector index to pick it up
+     * (a plain array is silently stored but never indexed); Neo4j and Memgraph store the plain
+     * array. Used by every write path that stores an embedding — the initial embed
+     * ([storeEmbeddingCypher]) and re-embed — so vector storage stays correct on every engine.
+     *
+     * @param paramName the bind-parameter name (without `$`) holding the embedding, e.g. `"embedding"`
+     */
+    fun embeddingLiteral(paramName: String): String = "\$$paramName"
 
     companion object {
 

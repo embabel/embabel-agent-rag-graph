@@ -15,20 +15,18 @@
  */
 package com.embabel.agent.rag.graph.model
 
+import org.drivine.annotation.NodeFragment
+import org.drivine.annotation.NodeId
+
 /**
- * Metadata for a FalkorDB index, as returned by `CALL db.indexes()`.
- *
- * FalkorDB's `db.indexes()` yields: label, properties, types, options,
- * language, stopwords, entitytype, status, info.
- *
- * @see <a href="https://docs.falkordb.com/cypher/procedures.html">FalkorDB Procedures</a>
+ * A label-generic fragment matching **any** content element — the whole hierarchy shares the
+ * `ContentElement` label, so a single fragment can stand in for a Document, Section, or Chunk when
+ * we only care about tree structure and common properties.
  */
-data class FalkorDbIndexInfo(
-    val label: String = "",
-    val properties: List<String> = emptyList(),
-    val types: Map<String, List<String>> = emptyMap(),
-) {
-    fun hasIndex(property: String, type: String): Boolean =
-        properties.contains(property) &&
-            types[property]?.any { it.equals(type, ignoreCase = true) } == true
-}
+@NodeFragment(labels = ["ContentElement"])
+data class ContentElementFragment(
+    @NodeId val id: String,
+    val text: String? = null,
+    val title: String? = null,
+    val uri: String? = null,
+)
