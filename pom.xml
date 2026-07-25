@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.embabel.build</groupId>
         <artifactId>embabel-build-parent</artifactId>
-        <version>0.1.12-SNAPSHOT</version>
+        <version>2.0.0-SNAPSHOT</version>
     </parent>
 
     <groupId>com.embabel.agent</groupId>
@@ -17,7 +17,7 @@
     <description>Graph database RAG implementation using Drivine for Embabel Agent. Supports Neo4j, FalkorDB, Memgraph, and Neptune Analytics via a dialect abstraction.</description>
 
     <properties>
-        <embabel-agent.version>0.4.0-SNAPSHOT</embabel-agent.version>
+        <embabel-agent.version>1.5.0-SNAPSHOT</embabel-agent.version>
         <drivine.version>0.0.38</drivine.version>
     </properties>
 
