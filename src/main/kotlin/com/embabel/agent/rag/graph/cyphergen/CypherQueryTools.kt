@@ -24,8 +24,8 @@ import com.embabel.common.ai.model.LlmOptions
 import com.embabel.common.textio.template.JinjavaTemplateRenderer
 import com.embabel.common.textio.template.TemplateRenderer
 import com.embabel.common.util.loggerFor
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
+import tools.jackson.module.kotlin.jacksonObjectMapper
+import tools.jackson.module.kotlin.readValue
 import org.drivine.manager.PersistenceManager
 import org.drivine.mapper.RowMapper
 import org.drivine.query.QuerySpecification

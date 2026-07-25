@@ -31,8 +31,8 @@ import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
 import com.embabel.common.util.loggerFor
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import tools.jackson.databind.ObjectMapper
+import tools.jackson.module.kotlin.jacksonObjectMapper
 import org.drivine.manager.GraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.drivine.mapper.RowMapper

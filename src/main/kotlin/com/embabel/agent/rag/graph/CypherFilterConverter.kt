@@ -176,6 +176,12 @@ class CypherFilterConverter(
             "NOT $nodeAlias.${filter.key} IN \$$paramName"
         }
 
+        is PropertyFilter.HasElement -> {
+            val paramName = "$paramPrefix${counter.next()}"
+            params[paramName] = filter.value
+            "\$$paramName IN $nodeAlias.${filter.key}"
+        }
+
         is PropertyFilter.Contains -> {
             val paramName = "$paramPrefix${counter.next()}"
             params[paramName] = filter.value
