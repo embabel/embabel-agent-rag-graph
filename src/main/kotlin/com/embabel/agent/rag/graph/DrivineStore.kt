@@ -54,10 +54,27 @@ import com.embabel.agent.rag.graph.dialect.RagDialect
 import org.drivine.manager.PersistenceManager
 import org.drivine.mapper.RowMapper
 import org.drivine.query.QuerySpecification
+import org.drivine.schema.FullTextIndexSpec
+import org.drivine.schema.SimilarityFunction
+import org.drivine.schema.UniquenessConstraintSpec
+import org.drivine.schema.VectorIndexSpec
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 
+/**
+ * The original graph-RAG store: persistence, search, and provisioning implemented with hand-written
+ * Cypher (via Drivine's [PersistenceManager] and the per-engine [RagDialect]).
+ *
+ * **Deprecated — scheduled for removal.** Superseded by [GraphObjectManagerStore], which fulfils the
+ * same [GraphRagStore] contract but drives persistence and retrieval through Drivine's typed
+ * `GraphObjectManager` and `@NodeFragment` models rather than string-built queries. This class is kept
+ * only as the A/B fallback while the replacement beds in, and will be removed once that is complete.
+ */
+@Deprecated(
+    "The original hand-rolled-Cypher store, superseded by GraphObjectManagerStore. Kept as the A/B " +
+        "comparison fallback; scheduled for removal.",
+)
 open class DrivineStore @JvmOverloads constructor(
     val persistenceManager: PersistenceManager,
     val properties: GraphRagServiceProperties,
@@ -75,8 +92,7 @@ open class DrivineStore @JvmOverloads constructor(
     chunkerConfig = chunkerConfig,
     chunkTransformer = chunkTransformer,
     embeddingService = embeddingService,
-), RagFacetProvider,
-    CoreSearchOperations, FilteringVectorSearch, FilteringTextSearch, ResultExpander {
+), GraphRagStore {
 
     override val name get() = properties.name
 
@@ -86,25 +102,55 @@ open class DrivineStore @JvmOverloads constructor(
         return type == Chunk::class.java.simpleName
     }
 
+    /**
+     * The schema this store manages: two vector indexes, two full-text indexes, one uniqueness
+     * constraint. Index names are pinned to [GraphRagServiceProperties] because the search Cypher
+     * binds them by name (`$vectorIndex` / `$fulltextIndex`) on Neo4j and Memgraph; on FalkorDB the
+     * name is ignored and search addresses the index by label/property.
+     *
+     * Applied per-spec through Drivine's [org.drivine.schema.IndexManager] /
+     * [org.drivine.schema.ConstraintManager], so this store only ever touches its own indexes — it
+     * never collides with schema a host application manages on the same database, and it needs no
+     * catalog-level version marker (a re-embed is handled explicitly by [reembedAll]).
+     */
+    private val vectorIndexSpecs: List<VectorIndexSpec>
+        get() = listOf(
+            VectorIndexSpec(
+                properties.chunkNodeName, "embedding", embeddingService.dimensions,
+                SimilarityFunction.COSINE, properties.contentElementIndex,
+            ),
+            VectorIndexSpec(
+                properties.entityNodeName, "embedding", embeddingService.dimensions,
+                SimilarityFunction.COSINE, properties.entityIndex,
+            ),
+        )
+
+    // Named with the `{label}_{property}_fulltext` convention that GraphObjectManagerStore + Drivine's
+    // `loadMatching` use, so both stores ensure the *same* (Chunk, text) index on a shared database —
+    // Neo4j permits only one full-text index per property, so two different names would clobber.
+    private val chunkFullTextIndexName = "${properties.chunkNodeName}_text_fulltext"
+
+    private val fullTextIndexSpecs: List<FullTextIndexSpec>
+        get() = listOf(
+            FullTextIndexSpec(properties.chunkNodeName, listOf("text"), chunkFullTextIndexName),
+            FullTextIndexSpec(
+                properties.entityNodeName, listOf("name", "description"), properties.entityFullTextIndex,
+            ),
+        )
+
+    private val uniquenessConstraintSpecs: List<UniquenessConstraintSpec>
+        get() = listOf(
+            UniquenessConstraintSpec(properties.entityNodeName, "id"),
+        )
+
+    private val provisioner = GraphProvisioner(persistenceManager)
+
     override fun provision() {
-        logger.info("Provisioning with dialect '{}', properties {}", dialect.name, properties)
-
-        dialect.createVectorIndex(
-            persistenceManager, properties.contentElementIndex, "Chunk",
-            embeddingService.dimensions, "cosine",
-        )
-        dialect.createVectorIndex(
-            persistenceManager, properties.entityIndex, properties.entityNodeName,
-            embeddingService.dimensions, "cosine",
-        )
-        dialect.createFullTextIndex(
-            persistenceManager, properties.contentElementFullTextIndex, "Chunk", listOf("text"),
-        )
-        dialect.createFullTextIndex(
-            persistenceManager, properties.entityFullTextIndex, properties.entityNodeName, listOf("name", "description"),
-        )
-        dialect.createUniqueConstraint(persistenceManager, properties.entityNodeName, "id")
-
+        logger.info("Provisioning schema for '{}' (dim={})", properties.name, embeddingService.dimensions)
+        // ensureSchema applies each constraint through Drivine's ConstraintManager, which creates
+        // FalkorDB's required backing index automatically — the old dialect could only warn-and-skip,
+        // so FalkorDB uniqueness is now actually enforced.
+        provisioner.ensureSchema(vectorIndexSpecs, fullTextIndexSpecs, uniquenessConstraintSpecs)
         logger.info("Provisioning complete")
     }
 
@@ -113,12 +159,7 @@ open class DrivineStore @JvmOverloads constructor(
     }
 
     override fun createInternalRelationships(root: NavigableDocument) {
-        // Create HAS_PARENT and PART_OF relationships via batch Cypher
-        cypherSearch.query(
-            purpose = "Create content element relationships",
-            query = "create_content_element_relationships",
-            params = emptyMap<String, Any>()
-        )
+        provisioner.createHasParentEdges()
 
         // Get all leaf section IDs from the document tree
         val leafSectionIds = root.descendants()
@@ -317,17 +358,15 @@ open class DrivineStore @JvmOverloads constructor(
      * indexes are dimension-bound and `IF NOT EXISTS` won't reconcile a dim
      * change, so we drop + reprovision unconditionally.
      */
-    fun reembedAll(): ReembedReport {
+    override fun reembedAll(): ReembedReport {
         logger.info(
             "reembedAll start. model={} dim={}",
             embeddingService.name,
             embeddingService.dimensions,
         )
-        listOf(properties.contentElementIndex, properties.entityIndex).forEach { name ->
-            persistenceManager.execute(
-                QuerySpecification.withStatement("DROP INDEX `$name` IF EXISTS")
-            )
-            logger.info("Dropped vector index {}", name)
+        vectorIndexSpecs.forEach { spec ->
+            persistenceManager.indexes.drop(spec)
+            logger.info("Dropped vector index {}", spec.effectiveName)
         }
         val chunks = reembedNodesWithLabel("Chunk")
         val entities = reembedNodesWithLabel(properties.entityNodeName)
@@ -366,7 +405,7 @@ open class DrivineStore @JvmOverloads constructor(
                         purpose = "reembed-write-$label",
                         query = """
                             MATCH (n:$label {id: ${'$'}id})
-                            SET n.embedding = ${'$'}embedding,
+                            SET n.embedding = ${dialect.embeddingLiteral("embedding")},
                                 n.embeddingModel = ${'$'}embeddingModel,
                                 n.embeddedAt = timestamp()
                             FOREACH (x IN CASE WHEN coalesce(n.text, '') = ${'$'}embeddedText THEN [1] ELSE [] END |
@@ -459,6 +498,11 @@ open class DrivineStore @JvmOverloads constructor(
         return results
     }
 
+    // TODO: `expand_zoom_out` resolves the parent by a `parentId` **property join**, which is a
+    //  relational pattern in a graph store — the `HAS_PARENT` edge already models this and following it
+    //  is a pointer hop rather than an id lookup. Kept for now; consider replacing with an edge
+    //  traversal (a `@GraphRelationship(HAS_PARENT, OUTGOING)` view — one hop, or recursive for full
+    //  ancestry) and dropping the `parentId`-join once the GOM store's ResultExpander lands.
     private fun expandByZoomOut(id: String): List<ContentElement> {
         val statement = queryResolver.resolve("expand_zoom_out")
             ?: error("Could not load expand_zoom_out.cypher")
@@ -731,7 +775,7 @@ open class DrivineStore @JvmOverloads constructor(
             purpose = "Chunk full text search",
             query = queryTemplate,
             params = commonParameters(request) + mapOf(
-                "fulltextIndex" to properties.contentElementFullTextIndex,
+                "fulltextIndex" to chunkFullTextIndexName,
                 "chunkLabel" to properties.chunkNodeName,
                 "searchText" to "\"${request.query}\"",
             ),
@@ -753,7 +797,7 @@ open class DrivineStore @JvmOverloads constructor(
             purpose = "Chunk full text search",
             query = queryTemplate,
             params = commonParameters(request) + mapOf(
-                "fulltextIndex" to properties.contentElementFullTextIndex,
+                "fulltextIndex" to chunkFullTextIndexName,
                 "chunkLabel" to properties.chunkNodeName,
                 "searchText" to request.query,
             ),
@@ -806,7 +850,7 @@ open class DrivineStore @JvmOverloads constructor(
             purpose = "Chunk full text search with filter",
             query = queryTemplate,
             params = commonParameters(request) + mapOf(
-                "fulltextIndex" to properties.contentElementFullTextIndex,
+                "fulltextIndex" to chunkFullTextIndexName,
                 "chunkLabel" to properties.chunkNodeName,
                 "searchText" to request.query,
             ),

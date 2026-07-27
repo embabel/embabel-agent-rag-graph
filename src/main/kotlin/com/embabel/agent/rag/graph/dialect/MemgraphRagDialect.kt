@@ -15,84 +15,30 @@
  */
 package com.embabel.agent.rag.graph.dialect
 
-import org.drivine.manager.PersistenceManager
-import org.drivine.query.QuerySpecification
-import org.slf4j.LoggerFactory
-
 /**
  * Memgraph RAG dialect implementation.
  *
- * Memgraph is openCypher-native with Bolt protocol support, so most Cypher
- * works identically to Neo4j. Key differences:
+ * Memgraph is openCypher-native with Bolt protocol support, so most Cypher works identically to
+ * Neo4j. Key search differences:
  *
- * - Vector index: `CREATE VECTOR INDEX name ON :Label(prop) WITH CONFIG {dimension: N, capacity: M}`
- *   (uses `WITH CONFIG` instead of `OPTIONS`, no `IF NOT EXISTS`)
  * - Vector search: `CALL vector_search.search(indexName, k, vector) YIELD node, similarity`
  *   (yields `similarity` not `score`)
- * - Fulltext index: `CREATE TEXT INDEX name ON :Label(prop)`
  * - Fulltext search: `CALL text_search.search_all(indexName, query) YIELD node, score`
- * - Unique constraints: `CREATE CONSTRAINT ON (n:Label) ASSERT n.prop IS UNIQUE`
+ *
+ * Schema creation is handled by Drivine's schema managers (see
+ * [com.embabel.agent.rag.graph.DrivineStore.provision]).
  *
  * @see <a href="https://memgraph.com/docs/querying/vector-search">Memgraph Vector Search</a>
  * @see <a href="https://memgraph.com/docs/querying/text-search">Memgraph Text Search</a>
  */
 class MemgraphRagDialect : RagDialect {
 
-    private val logger = LoggerFactory.getLogger(MemgraphRagDialect::class.java)
-
     override val name = "Memgraph"
-
-    override fun createVectorIndex(
-        persistenceManager: PersistenceManager,
-        name: String,
-        label: String,
-        dimensions: Int,
-        similarityFunction: String,
-    ) {
-        // Memgraph doesn't support IF NOT EXISTS for vector indexes.
-        // Check existing indexes first.
-        if (vectorIndexExists(persistenceManager, name)) {
-            logger.debug("Vector index '{}' already exists, skipping", name)
-            return
-        }
-        val metric = when (similarityFunction.lowercase()) {
-            "cosine" -> "cos"
-            "euclidean", "l2" -> "l2sq"
-            "dot", "inner_product" -> "ip"
-            else -> similarityFunction
-        }
-        persistenceManager.execute(QuerySpecification.withStatement(
-            """
-            CREATE VECTOR INDEX $name ON :$label($EMBEDDING_PROPERTY)
-            WITH CONFIG {dimension: $dimensions, metric: "$metric", capacity: 10000}""".trimIndent()
-        ))
-    }
-
-    override fun createFullTextIndex(
-        persistenceManager: PersistenceManager,
-        name: String,
-        label: String,
-        properties: List<String>,
-    ) {
-        val propsClause = properties.joinToString(", ")
-        persistenceManager.execute(QuerySpecification.withStatement(
-            "CREATE TEXT INDEX $name ON :$label($propsClause)"
-        ))
-    }
-
-    override fun createUniqueConstraint(
-        persistenceManager: PersistenceManager,
-        label: String,
-        property: String,
-    ) {
-        persistenceManager.execute(QuerySpecification.withStatement(
-            "CREATE CONSTRAINT ON (n:$label) ASSERT n.$property IS UNIQUE"
-        ))
-    }
 
     override fun chunkVectorSearchCypher(): String = """
         CALL vector_search.search(${'$'}vectorIndex, ${'$'}topK, ${'$'}queryVector)
         YIELD node AS chunk, similarity AS score
+        WITH chunk, score
           WHERE score >= ${'$'}similarityThreshold
         RETURN {
                  text:  chunk.text,
@@ -120,6 +66,7 @@ class MemgraphRagDialect : RagDialect {
     override fun entityVectorSearchCypher(): String = """
         CALL vector_search.search(${'$'}index, ${'$'}topK, ${'$'}queryVector)
         YIELD node AS m, similarity AS score
+        WITH m, score
           WHERE score >= ${'$'}similarityThreshold
           AND any(label IN labels(m) WHERE label IN ${'$'}labels)
         RETURN {
@@ -168,21 +115,6 @@ class MemgraphRagDialect : RagDialect {
             SET n._text = ${'$'}embeddedText
         )
         RETURN {nodesUpdated: COUNT(n) }""".trimIndent()
-
-    private fun vectorIndexExists(persistenceManager: PersistenceManager, name: String): Boolean {
-        return try {
-            @Suppress("UNCHECKED_CAST")
-            val indexes = persistenceManager.query(
-                QuerySpecification
-                    .withStatement("CALL vector_search.show_index_info() YIELD * RETURN *")
-                    .transform(Map::class.java)
-            ) as List<Map<String, Any>>
-            indexes.any { it["index_name"]?.toString() == name }
-        } catch (e: Exception) {
-            logger.debug("Could not query vector indexes: {}", e.message)
-            false
-        }
-    }
 
     companion object {
         private const val EMBEDDING_PROPERTY = "embedding"

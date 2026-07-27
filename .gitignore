@@ -44,3 +44,6 @@ build/
 
 ## Jackknife (jar exploration cache)
 .jackknife/
+# Drivine KSP codegen (Gradle sub-build) — generated output + gradle work dirs
+codegen-gradle/build/
+codegen-gradle/.gradle/

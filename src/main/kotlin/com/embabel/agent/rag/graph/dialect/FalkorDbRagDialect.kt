@@ -15,120 +15,39 @@
  */
 package com.embabel.agent.rag.graph.dialect
 
-import com.embabel.agent.rag.graph.model.FalkorDbIndexInfo
-import org.drivine.manager.PersistenceManager
-import org.drivine.query.QuerySpecification
-import org.slf4j.LoggerFactory
-
 /**
  * FalkorDB RAG dialect implementation.
  *
- * Key differences from Neo4j:
- * - Vector index: `CREATE VECTOR INDEX FOR (n:Label) ON (n.embedding) OPTIONS {dimension: N, similarityFunction: 'cosine'}`
- *   (no `IF NOT EXISTS`, no backtick-quoted config keys)
- * - Vector search: `CALL db.idx.vector.queryNodes(label, property, k, vecf32(vector))`
- *   (label and property as string arguments, `vecf32()` wrapper required)
- * - Fulltext index: `CALL db.idx.fulltext.createNodeIndex(label, property)`
- *   (procedure call, not DDL)
- * - Fulltext search: `CALL db.idx.fulltext.queryNodes(label, query)`
- *   (label as string argument instead of index name)
- * - Unique constraints: `GRAPH.CONSTRAINT CREATE` — a Redis command, not Cypher.
- *   Requires issuing through the FalkorDB driver directly; returns null here.
+ * Key search differences from Neo4j:
+ * - Vector search: `CALL db.idx.vector.queryNodes(label, property, k, vecf32(vector))` — label and
+ *   property as string arguments, `vecf32()` wrapper required, and the yielded `score` is a
+ *   *distance* (converted to similarity as `1 - score`).
+ * - Fulltext search: `CALL db.idx.fulltext.queryNodes(label, query)` — label as string argument
+ *   instead of an index name.
+ * - Embeddings must be stored as `vecf32(...)` for the vector index to pick them up (see
+ *   [embeddingLiteral]).
+ *
+ * Schema creation is handled by Drivine's schema managers (see
+ * [com.embabel.agent.rag.graph.DrivineStore.provision]); on FalkorDB Drivine issues the
+ * `GRAPH.CONSTRAINT CREATE` Redis command and its required backing index, which this dialect
+ * previously could not.
  *
  * @see <a href="https://docs.falkordb.com/cypher/indexing/vector-index.html">FalkorDB Vector Index</a>
  * @see <a href="https://docs.falkordb.com/cypher/indexing/fulltext-index.html">FalkorDB Fulltext Index</a>
- * @see <a href="https://docs.falkordb.com/commands/graph.constraint-create.html">FalkorDB Constraints</a>
  */
 class FalkorDbRagDialect : RagDialect {
 
-    private val logger = LoggerFactory.getLogger(FalkorDbRagDialect::class.java)
-
     override val name = "FalkorDB"
-
-    override fun createVectorIndex(
-        persistenceManager: PersistenceManager,
-        name: String,
-        label: String,
-        dimensions: Int,
-        similarityFunction: String,
-    ) {
-        if (indexExists(persistenceManager, label, "embedding", "VECTOR")) {
-            logger.debug("Vector index on {}(embedding) already exists, skipping", label)
-            return
-        }
-        persistenceManager.execute(QuerySpecification.withStatement(
-            """
-            CREATE VECTOR INDEX FOR (n:$label) ON (n.embedding)
-            OPTIONS {dimension: $dimensions, similarityFunction: '$similarityFunction'}""".trimIndent()
-        ))
-    }
-
-    override fun createFullTextIndex(
-        persistenceManager: PersistenceManager,
-        name: String,
-        label: String,
-        properties: List<String>,
-    ) {
-        // FalkorDB uses a procedure call per property rather than DDL.
-        for (property in properties) {
-            if (indexExists(persistenceManager, label, property, "FULLTEXT")) {
-                logger.debug("Fulltext index on {}({}) already exists, skipping", label, property)
-                continue
-            }
-            persistenceManager.execute(QuerySpecification.withStatement(
-                "CALL db.idx.fulltext.createNodeIndex('$label', '$property')"
-            ))
-        }
-    }
-
-    /**
-     * FalkorDB unique constraints use the Redis command `GRAPH.CONSTRAINT CREATE`,
-     * which cannot be issued as Cypher through the persistence manager.
-     * This must be handled through the FalkorDB Redis driver directly.
-     */
-    override fun createUniqueConstraint(
-        persistenceManager: PersistenceManager,
-        label: String,
-        property: String,
-    ) {
-        logger.warn(
-            "FalkorDB unique constraints require the Redis command " +
-                "GRAPH.CONSTRAINT CREATE, which cannot be issued as Cypher. " +
-                "Skipping constraint creation for {}({}). " +
-                "Issue 'GRAPH.CONSTRAINT CREATE key UNIQUE NODE {} PROPERTIES 1 {}' " +
-                "through the FalkorDB Redis driver directly.",
-            label, property, label, property,
-        )
-    }
-
-    /**
-     * Check whether an index already exists on the given label/property/type
-     * by querying `CALL db.indexes()`.
-     *
-     * FalkorDB's `db.indexes()` yields: label, properties, types, options,
-     * language, stopwords, entitytype, status, info.
-     *
-     * @see <a href="https://docs.falkordb.com/cypher/procedures.html">FalkorDB Procedures</a>
-     */
-    private fun indexExists(persistenceManager: PersistenceManager, label: String, property: String, type: String): Boolean {
-        val indexes = persistenceManager.query(
-            QuerySpecification.withStatement(
-                """CALL db.indexes()
-                   YIELD label, properties, types
-                   RETURN {label: label, properties: properties, types: types} AS idx"""
-            ).transform(FalkorDbIndexInfo::class.java)
-        )
-        return indexes.any { it.label == label && it.hasIndex(property, type) }
-    }
 
     override fun chunkVectorSearchCypher(): String = """
         CALL db.idx.vector.queryNodes(${'$'}chunkLabel, 'embedding', ${'$'}topK, vecf32(${'$'}queryVector))
         YIELD node AS chunk, score
-          WHERE score >= ${'$'}similarityThreshold
+        WITH chunk, (1.0 - score) AS similarity
+          WHERE similarity >= ${'$'}similarityThreshold
         RETURN {
                  text:  chunk.text,
                  id:    chunk.id,
-                 score: score
+                 score: similarity
                } AS result
           ORDER BY result.score DESC""".trimIndent()
 
@@ -138,7 +57,7 @@ class FalkorDbRagDialect : RagDialect {
         WITH collect({node: chunk, score: score}) AS results, max(score) AS maxScore
         UNWIND results AS result
         WITH result.node AS chunk,
-             result.score / maxScore AS normalizedScore
+             CASE WHEN maxScore > 0 THEN result.score / maxScore ELSE 1.0 END AS normalizedScore
           WHERE normalizedScore >= ${'$'}similarityThreshold
         RETURN {
                  text: chunk.text,
@@ -151,7 +70,8 @@ class FalkorDbRagDialect : RagDialect {
     override fun entityVectorSearchCypher(): String = """
         CALL db.idx.vector.queryNodes(${'$'}entityNodeName, 'embedding', ${'$'}topK, vecf32(${'$'}queryVector))
         YIELD node AS m, score
-          WHERE score >= ${'$'}similarityThreshold
+        WITH m, (1.0 - score) AS similarity
+          WHERE similarity >= ${'$'}similarityThreshold
           AND any(label IN labels(m) WHERE label IN ${'$'}labels)
         RETURN {
                  properties:  properties(m),
@@ -159,7 +79,7 @@ class FalkorDbRagDialect : RagDialect {
                  description: COALESCE(m.description, ''),
                  id:          COALESCE(m.id, ''),
                  labels:      labels(m),
-                 score:       score
+                 score:       similarity
                } AS result
           ORDER BY result.score DESC""".trimIndent()
 
@@ -168,10 +88,10 @@ class FalkorDbRagDialect : RagDialect {
         YIELD node AS m, score
         WHERE score IS NOT NULL AND any(label IN labels(m) WHERE label IN ${'$'}labels)
         WITH collect({node: m, score: score}) AS results, max(score) AS maxScore
-          WHERE maxScore IS NOT NULL AND maxScore > 0
+          WHERE maxScore IS NOT NULL
         UNWIND results AS result
         WITH result.node AS match,
-             COALESCE(result.score / maxScore, 0.0) AS score,
+             CASE WHEN maxScore > 0 THEN result.score / maxScore ELSE 1.0 END AS score,
              result.node.name AS name,
              result.node.description AS description,
              result.node.id AS id,
@@ -187,9 +107,12 @@ class FalkorDbRagDialect : RagDialect {
                } AS result
           ORDER BY result.score DESC""".trimIndent()
 
+    /** FalkorDB indexes a vector property only when it is stored as `vecf32(...)`. */
+    override fun embeddingLiteral(paramName: String): String = "vecf32(\$$paramName)"
+
     override fun storeEmbeddingCypher(labels: String): String = """
         MERGE (n:$labels {id: ${'$'}id})
-        SET n.embedding = ${'$'}embedding,
+        SET n.embedding = ${embeddingLiteral("embedding")},
          n.embeddingModel = ${'$'}embeddingModel,
          n.embeddedAt = timestamp()
         FOREACH (x IN CASE WHEN coalesce(n.text, '') = ${'$'}embeddedText THEN [1] ELSE [] END |

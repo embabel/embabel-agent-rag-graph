@@ -252,5 +252,11 @@ class CypherFilterConverter(
             // It should be handled at a higher level where the actual filter type is known.
             throw IllegalArgumentException("Cannot convert ObjectFilter directly to Cypher. Handle specific filter types instead.")
         }
+
+        // Any other PropertyFilter subtype (e.g. embabel 1.0's element-membership filters) has no
+        // node-property WHERE form — the Cypher converter can't express it.
+        else -> throw IllegalArgumentException(
+            "Unsupported PropertyFilter for Cypher conversion: ${filter::class.simpleName}",
+        )
     }
 }

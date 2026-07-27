@@ -66,7 +66,6 @@ class FalkorDbIntegrationTest {
     @Qualifier("graph")
     lateinit var persistenceManager: PersistenceManager
 
-    private val dialect = FalkorDbRagDialect()
     private val queryResolver: LogicalQueryResolver = FixedLocationLogicalQueryResolver()
     private val testNodeIds = mutableListOf<String>()
 
@@ -77,32 +76,6 @@ class FalkorDbIntegrationTest {
                 QuerySpecification.withStatement("MATCH (n) WHERE n.id IN \$ids DETACH DELETE n")
                     .bind(mapOf("ids" to testNodeIds))
             )
-        }
-    }
-
-    @Nested
-    inner class Provisioning {
-
-        @Test
-        fun `vector index creation is idempotent`() {
-            dialect.createVectorIndex(persistenceManager, "test_vec_idx", "TestChunk", 384, "cosine")
-            dialect.createVectorIndex(persistenceManager, "test_vec_idx", "TestChunk", 384, "cosine")
-        }
-
-        @Test
-        fun `fulltext index creation is idempotent`() {
-            dialect.createFullTextIndex(persistenceManager, "test_ft_idx", "TestChunk", listOf("text"))
-            dialect.createFullTextIndex(persistenceManager, "test_ft_idx", "TestChunk", listOf("text"))
-        }
-
-        @Test
-        fun `provision cycle - create, verify idempotent, drop, recreate`() {
-            dialect.createVectorIndex(persistenceManager, "lifecycle_idx", "LifecycleNode", 128, "cosine")
-            dialect.createVectorIndex(persistenceManager, "lifecycle_idx", "LifecycleNode", 128, "cosine")
-            persistenceManager.execute(
-                QuerySpecification.withStatement("DROP VECTOR INDEX FOR (n:LifecycleNode) ON (n.embedding)")
-            )
-            dialect.createVectorIndex(persistenceManager, "lifecycle_idx", "LifecycleNode", 128, "cosine")
         }
     }
 
