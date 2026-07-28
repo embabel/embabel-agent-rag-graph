@@ -137,6 +137,9 @@ class GraphObjectManagerStore(
             fullTextIndexes = listOf(chunkFullTextIndex),
             constraints = listOf(UniquenessConstraintSpec(properties.entityNodeName, "id")),
         )
+        // Transitional: loudly flag chunks whose free-form metadata is in the legacy flat layout (which
+        // this store's metadata filters can't see). Remove with LegacyChunkMetadataCheck once migrated.
+        provisioner.warnOnLegacyChunkMetadata(properties.chunkNodeName, ChunkNode.KNOWN_FLAT_PROPERTIES)
         logger.info("Provisioning complete")
     }
 
@@ -225,6 +228,8 @@ class GraphObjectManagerStore(
         require(clazz == Chunk::class.java) {
             "GraphObjectManagerStore textSearchWithFilter only supports Chunk, got: $clazz"
         }
+        // A blank query would reach Lucene and throw a ParseException — empty-in, empty-out (see chunkFullTextSearch).
+        if (request.query.isBlank()) return emptyList()
         return gom.loadMatching(
             ChunkNode::class.java, ChunkNodeQueryDsl.INSTANCE,
             request.query, request.topK, request.similarityThreshold,
@@ -250,9 +255,15 @@ class GraphObjectManagerStore(
             .map { SimilarityResult.create(it.value.toCoreType(), it.score) }
     }
 
-    /** Chunk full-text search shared by [textSearch] and the [facets] search function. */
+    /**
+     * Chunk full-text search shared by [textSearch] and the [facets] search function. A blank query
+     * returns no results rather than reaching Lucene — an empty query string is ordinary input (an LLM
+     * driving the tool surface can emit one), and the full-text parser would otherwise throw a
+     * `ParseException`. Empty (not match-all) is the correct answer.
+     */
     private fun chunkFullTextSearch(query: String, topK: Int, threshold: Double): List<SimilarityResult<out Chunk>> =
-        gom.loadMatching<ChunkNode>(query, topK, threshold)
+        if (query.isBlank()) emptyList()
+        else gom.loadMatching<ChunkNode>(query, topK, threshold)
             .map { SimilarityResult.create(it.value.toCoreType(), it.score) }
 
     // ----- RagFacetProvider -----

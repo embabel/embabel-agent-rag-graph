@@ -141,4 +141,20 @@ class Neo4jGomFilteredSearchTest {
         assertEquals(setOf(id("a"), id("b")), textIds(PropertyFilter.Eq("container_section_id", id("sec-1"))), "section 1")
         assertEquals(setOf(id("b")), textIds(PropertyFilter.Not(PropertyFilter.Eq("source", "wiki"))), "NOT source=wiki")
     }
+
+    @Test
+    fun `blank full-text query returns empty, not a Lucene ParseException`() {
+        assertEquals(
+            0,
+            store.textSearch(TextSimilaritySearchRequest("", 0.0, 10), Chunk::class.java).size,
+            "unfiltered blank query",
+        )
+        assertEquals(
+            0,
+            store.textSearchWithFilter(
+                TextSimilaritySearchRequest("   ", 0.0, 10), Chunk::class.java, PropertyFilter.Eq("source", "wiki"), null,
+            ).size,
+            "filtered blank query",
+        )
+    }
 }

@@ -97,6 +97,15 @@ data class ChunkNode(
             SEQUENCE_NUMBER, CHUNK_INDEX, TOTAL_CHUNKS,
         )
 
+        /**
+         * Every property this fragment persists as a **flat** (non-`metadata.`-bagged) node property: the
+         * base fields plus the promoted [STRUCTURAL_KEYS]. Used to detect legacy free-form metadata that an
+         * older store wrote flat instead of into the bag (see [LegacyChunkMetadataCheck]) — a flat key
+         * outside this set is not one of ours.
+         */
+        val KNOWN_FLAT_PROPERTIES: Set<String> =
+            STRUCTURAL_KEYS + setOf("id", "text", "urtext", "parentId", "uri", "embedding")
+
         private fun Map<String, Any?>.longOrNull(key: String): Long? =
             when (val v = this[key]) {
                 is Number -> v.toLong()
