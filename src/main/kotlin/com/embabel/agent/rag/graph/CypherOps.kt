@@ -50,7 +50,12 @@ fun PersistenceManager.executeCypher(
     execute(QuerySpecification.withStatement(cypher).bind(params).render(render))
 }
 
-/** Run inline [cypher] and return its rows as maps. */
+/**
+ * Run inline [cypher] that returns a single **map-valued** column (`RETURN {k: v} AS row`), read as one
+ * map per row. Note the narrow contract: Drivine unwraps a single *scalar* column to the bare value and
+ * returns a multi-column record as a list, and `transform(Map)` can convert neither — for a scalar column
+ * (`RETURN x AS x`) use [queryForScalars] instead.
+ */
 @Suppress("UNCHECKED_CAST")
 fun PersistenceManager.queryForRows(
     purpose: String,
@@ -60,6 +65,23 @@ fun PersistenceManager.queryForRows(
 ): List<Map<String, Any>> {
     log(purpose, cypher, params)
     return query(QuerySpecification.withStatement(cypher).bind(params).render(render).transform(Map::class.java)) as List<Map<String, Any>>
+}
+
+/**
+ * Run inline [cypher] that returns a single **scalar** column (`RETURN x AS x`), one value per row.
+ * Drivine unwraps a single-column record to the bare value, so such a result is read as scalars of [type]
+ * — passing it to [queryForRows] (which needs a map-valued column) throws a Jackson mismatch.
+ */
+@Suppress("UNCHECKED_CAST")
+fun <T : Any> PersistenceManager.queryForScalars(
+    purpose: String,
+    cypher: String,
+    type: Class<T>,
+    params: Map<String, Any?> = emptyMap(),
+    render: Map<String, Any> = emptyMap(),
+): List<T> {
+    log(purpose, cypher, params)
+    return query(QuerySpecification.withStatement(cypher).bind(params).render(render).transform(type)) as List<T>
 }
 
 /** Run inline [cypher] that returns a single integer (e.g. a `count(*)`). */

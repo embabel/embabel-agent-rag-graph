@@ -137,9 +137,6 @@ class GraphObjectManagerStore(
             fullTextIndexes = listOf(chunkFullTextIndex),
             constraints = listOf(UniquenessConstraintSpec(properties.entityNodeName, "id")),
         )
-        // Transitional: loudly flag chunks whose free-form metadata is in the legacy flat layout (which
-        // this store's metadata filters can't see). Remove with LegacyChunkMetadataCheck once migrated.
-        provisioner.warnOnLegacyChunkMetadata(properties.chunkNodeName, ChunkNode.KNOWN_FLAT_PROPERTIES)
         logger.info("Provisioning complete")
     }
 
@@ -381,17 +378,20 @@ class GraphObjectManagerStore(
 
     // Entity → chunk is a relationship traversal — kept as Cypher; entities are not modelled yet.
     override fun findChunksForEntity(entityId: String): List<Chunk> {
-        val ids = persistenceManager.queryForRows(
+        val ids = persistenceManager.queryForScalars(
             purpose = "find-chunks-for-entity (gom store)",
             // A label can't be a bound parameter in Cypher — it's structural — so Drivine's `render`
-            // `$(…)` inlines the trusted chunk label while the entity id stays a bound `$param`.
+            // `$(…)` inlines the trusted chunk label while the entity id stays a bound `$param`. The
+            // result is a single scalar column (`chunk.id`), so it must be read with queryForScalars —
+            // queryForRows can't map a scalar-column result.
             cypher = $$"""
                 MATCH (e {id: $entityId})<-[:HAS_ENTITY]-(chunk:$($chunkLabel))
                 RETURN chunk.id AS id
             """.trimIndent(),
+            type = String::class.java,
             params = mapOf("entityId" to entityId),
             render = mapOf("chunkLabel" to properties.chunkNodeName),
-        ).mapNotNull { it["id"] as? String }
+        )
         return findAllChunksById(ids).toList()
     }
 

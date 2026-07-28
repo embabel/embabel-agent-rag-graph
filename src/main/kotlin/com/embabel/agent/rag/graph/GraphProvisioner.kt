@@ -88,14 +88,6 @@ class GraphProvisioner(
     }
 
     /**
-     * Transitional: WARN if any chunk carries free-form metadata as flat properties (the legacy
-     * [DrivineStore] layout) rather than in the `metadata.` bag [GraphObjectManagerStore] filters on.
-     * Delegates to [LegacyChunkMetadataCheck] — remove both once installs have migrated.
-     */
-    fun warnOnLegacyChunkMetadata(chunkLabel: String, knownFlatProperties: Set<String>) =
-        LegacyChunkMetadataCheck.warnIfLegacyFlatMetadata(persistenceManager, chunkLabel, knownFlatProperties)
-
-    /**
      * Create the `HAS_PARENT` edges from each content element's `parentId` — the batch traversal both
      * stores run to build the hierarchy the recursive content-tree views walk.
      */
