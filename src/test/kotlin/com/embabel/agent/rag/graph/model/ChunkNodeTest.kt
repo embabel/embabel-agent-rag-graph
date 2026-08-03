@@ -16,6 +16,7 @@
 package com.embabel.agent.rag.graph.model
 
 import com.embabel.agent.rag.model.Chunk
+import com.embabel.agent.rag.model.ChunkStructure
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -58,7 +59,7 @@ class ChunkNodeTest {
     }
 
     @Test
-    fun `round-trips back into a Chunk with metadata reassembled`() {
+    fun `round-trips back into a Chunk with structure restored`() {
         val original = Chunk.create(
             text = "body",
             parentId = "parent-1",
@@ -75,10 +76,82 @@ class ChunkNodeTest {
         assertEquals(original.id, restored.id)
         assertEquals(original.text, restored.text)
         assertEquals(original.parentId, restored.parentId)
-        // metadata is whole again — structural keys back alongside free-form
-        assertEquals("sec-1", restored.metadata["container_section_id"])
-        assertEquals(3L, restored.metadata["sequence_number"])
+        // the typed structure is what survives the round trip...
+        assertEquals(original.structure, restored.structure)
+        assertEquals("sec-1", restored.structure.containerSectionId)
+        assertEquals(3, restored.structure.sequenceNumber)
+        // ...and free-form metadata is untouched
         assertEquals("wiki", restored.metadata["source"])
+        // the compat view still surfaces structural keys, with core's Int typing preserved
+        assertEquals("sec-1", restored.metadata["container_section_id"])
+        assertEquals(3, restored.metadata["sequence_number"])
+    }
+
+    @Test
+    fun `maps every ChunkStructure field through the node and back`() {
+        val structure = ChunkStructure(
+            rootDocumentId = "doc-1",
+            containerSectionId = "container-1",
+            containerSectionTitle = "Container",
+            containerSectionUrl = "http://example.com/container",
+            leafSectionId = "leaf-1",
+            leafSectionTitle = "Leaf",
+            leafSectionUrl = "http://example.com/leaf",
+            chunkIndex = 2,
+            totalChunks = 7,
+            sequenceNumber = 4,
+        )
+        val chunk = Chunk.create(text = "body", parentId = "p", id = "c", structure = structure)
+
+        // Nothing is dropped: every field a chunker can set has a home on the node.
+        assertEquals(structure, ChunkNode.from(chunk).toCoreType().structure)
+    }
+
+    @Test
+    fun `reads container section url bagged by pre-promotion writes`() {
+        // Rows written before container_section_url was promoted have it under the metadata. prefix.
+        val node = ChunkNode(
+            id = "c",
+            text = "body",
+            urtext = "body",
+            parentId = "p",
+            freeFormMetadata = mapOf("container_section_url" to "http://example.com/legacy"),
+        )
+
+        assertEquals("http://example.com/legacy", node.toCoreType().structure.containerSectionUrl)
+    }
+
+    @Test
+    fun `maps structure even when metadata no longer exposes structural keys`() {
+        // Pins the behaviour core's deprecation window will eventually force: a Chunk whose
+        // structural fields are ONLY reachable via structure, never via the metadata map.
+        val chunk = StructureOnlyChunk(
+            id = "c",
+            text = "body",
+            urtext = "body",
+            parentId = "p",
+            metadata = mapOf("source" to "wiki"),
+            structure = ChunkStructure(rootDocumentId = "doc-1", sequenceNumber = 9),
+        )
+
+        val node = ChunkNode.from(chunk)
+
+        assertEquals("doc-1", node.rootDocumentId)
+        assertEquals(9L, node.sequenceNumber)
+        assertEquals("wiki", node.freeFormMetadata["source"])
+    }
+
+    /** A [Chunk] that does not mirror its structure into [Chunk.metadata]. */
+    private data class StructureOnlyChunk(
+        override val id: String,
+        override val text: String,
+        override val urtext: String,
+        override val parentId: String,
+        override val metadata: Map<String, Any?>,
+        override val structure: ChunkStructure,
+    ) : Chunk {
+        override fun withAdditionalMetadata(metadata: Map<String, Any?>): Chunk =
+            copy(metadata = this.metadata + metadata)
     }
 
     @Test
