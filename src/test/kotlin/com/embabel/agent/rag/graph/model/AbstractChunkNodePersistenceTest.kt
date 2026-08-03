@@ -95,7 +95,7 @@ abstract class AbstractChunkNodePersistenceTest {
     }
 
     @Test
-    fun `round-trips a chunk with metadata reassembled`() {
+    fun `round-trips a chunk with structure restored`() {
         val id = UUID.randomUUID().toString()
         tracked += id
         val chunk = Chunk.create(
@@ -110,8 +110,10 @@ abstract class AbstractChunkNodePersistenceTest {
         assertNotNull(loaded, "[$engineName] chunk should load back")
         val restored = loaded!!.toCoreType()
         assertEquals("Retrieval body", restored.text)
-        assertEquals("sec-1", restored.metadata["container_section_id"])
-        assertEquals(2L, restored.metadata["sequence_number"])
+        // structure survives the DB round trip as typed fields (the engine's Long widens back to Int)
+        assertEquals("sec-1", restored.structure.containerSectionId)
+        assertEquals(2, restored.structure.sequenceNumber)
+        assertEquals(chunk.structure, restored.structure)
         assertEquals("wiki", restored.metadata["source"])
     }
 

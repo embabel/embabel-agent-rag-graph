@@ -16,6 +16,7 @@
 package com.embabel.agent.rag.graph.model
 
 import com.embabel.agent.rag.model.Chunk
+import com.embabel.agent.rag.model.ChunkStructure
 import org.drivine.annotation.FullTextIndex
 import org.drivine.annotation.GraphProperty
 import org.drivine.annotation.NodeFragment
@@ -28,12 +29,18 @@ import org.drivine.schema.SimilarityFunction
  * Drivine `@NodeFragment` model for a persisted [Chunk], mapped through Drivine's
  * [org.drivine.manager.GraphObjectManager] instead of hand-rolled Cypher.
  *
- * The chunker's **structural** keys (`container_section_id`, `sequence_number`, …) are promoted from
- * the open metadata map to real typed fields, kept flat on disk under their original snake_case names
- * via [GraphProperty] — so the traversal Cypher that reads them (`expand_by_sequence.cypher`) is
- * unchanged and no data migration is needed. Genuinely free-form metadata goes to a [PropertyBag]
- * under the `metadata.` prefix. [toCoreType] reassembles both back into [Chunk.metadata], preserving
- * the core contract (callers still read `chunk.metadata["sequence_number"]`).
+ * The chunker's **structural** fields (`containerSectionId`, `sequenceNumber`, …) map to and from the
+ * core [ChunkStructure], kept flat on disk under their original snake_case names via [GraphProperty] —
+ * so the traversal Cypher that reads them (`expand_by_sequence.cypher`) is unchanged and no data
+ * migration is needed. Genuinely free-form metadata goes to a [PropertyBag] under the `metadata.`
+ * prefix.
+ *
+ * Both directions go through [Chunk.structure], **not** [Chunk.metadata]. The string-key view still
+ * exposes the structural fields, so mapping through it happens to work — but only until that
+ * deprecation shim is removed, at which point a metadata-based mapper would start reading nulls
+ * silently: chunks would persist without `sequence_number` / `root_document_id`, `expand_by_sequence`
+ * would stop matching, and `ChunkMergingEnhancer` (typed-only as of embabel/embabel-agent#1867) would
+ * quietly stop merging. Going through the typed accessor makes that a compile error instead.
  *
  * The `embedding` is a [VectorIndex] property, so a single [org.drivine.manager.GraphObjectManager.save]
  * persists structure and embedding together — and on FalkorDB Drivine writes it as `vecf32(...)` so the
@@ -49,6 +56,7 @@ data class ChunkNode(
     @GraphProperty("root_document_id") val rootDocumentId: String? = null,
     @GraphProperty("container_section_id") val containerSectionId: String? = null,
     @GraphProperty("container_section_title") val containerSectionTitle: String? = null,
+    @GraphProperty("container_section_url") val containerSectionUrl: String? = null,
     @GraphProperty("leaf_section_id") val leafSectionId: String? = null,
     @GraphProperty("leaf_section_title") val leafSectionTitle: String? = null,
     @GraphProperty("leaf_section_url") val leafSectionUrl: String? = null,
@@ -59,70 +67,58 @@ data class ChunkNode(
     @PropertyBag(prefix = "metadata") val freeFormMetadata: Map<String, Any?> = emptyMap(),
 ) : ContentElementNode {
 
-    /** Reconstruct the core [Chunk], merging the promoted structural fields back into its metadata. */
+    /**
+     * Reconstruct the core [Chunk], restoring the promoted fields as its typed [ChunkStructure].
+     * They remain readable as `chunk.metadata["sequence_number"]` for as long as core's compat view
+     * lasts, but that is core's business now, not this mapper's.
+     */
     override fun toCoreType(): Chunk = Chunk.create(
         text = text,
         parentId = parentId,
-        metadata = buildMap {
-            putAll(freeFormMetadata)
-            rootDocumentId?.let { put(ROOT_DOCUMENT_ID, it) }
-            containerSectionId?.let { put(CONTAINER_SECTION_ID, it) }
-            containerSectionTitle?.let { put(CONTAINER_SECTION_TITLE, it) }
-            leafSectionId?.let { put(LEAF_SECTION_ID, it) }
-            leafSectionTitle?.let { put(LEAF_SECTION_TITLE, it) }
-            leafSectionUrl?.let { put(LEAF_SECTION_URL, it) }
-            sequenceNumber?.let { put(SEQUENCE_NUMBER, it) }
-            chunkIndex?.let { put(CHUNK_INDEX, it) }
-            totalChunks?.let { put(TOTAL_CHUNKS, it) }
-        },
+        metadata = freeFormMetadata,
         id = id,
         urtext = urtext,
+        structure = ChunkStructure(
+            rootDocumentId = rootDocumentId,
+            containerSectionId = containerSectionId,
+            containerSectionTitle = containerSectionTitle,
+            // Pre-promotion rows bagged this one under `metadata.container_section_url`.
+            containerSectionUrl = containerSectionUrl
+                ?: freeFormMetadata[ChunkStructure.CONTAINER_SECTION_URL] as? String,
+            leafSectionId = leafSectionId,
+            leafSectionTitle = leafSectionTitle,
+            leafSectionUrl = leafSectionUrl,
+            chunkIndex = chunkIndex?.toInt(),
+            totalChunks = totalChunks?.toInt(),
+            sequenceNumber = sequenceNumber?.toInt(),
+        ),
     )
 
     companion object {
-        const val ROOT_DOCUMENT_ID = "root_document_id"
-        const val CONTAINER_SECTION_ID = "container_section_id"
-        const val CONTAINER_SECTION_TITLE = "container_section_title"
-        const val LEAF_SECTION_ID = "leaf_section_id"
-        const val LEAF_SECTION_TITLE = "leaf_section_title"
-        const val LEAF_SECTION_URL = "leaf_section_url"
-        const val SEQUENCE_NUMBER = "sequence_number"
-        const val CHUNK_INDEX = "chunk_index"
-        const val TOTAL_CHUNKS = "total_chunks"
-
-        /** The metadata keys promoted to typed fields — everything else stays in the property bag. */
-        private val STRUCTURAL_KEYS = setOf(
-            ROOT_DOCUMENT_ID, CONTAINER_SECTION_ID, CONTAINER_SECTION_TITLE,
-            LEAF_SECTION_ID, LEAF_SECTION_TITLE, LEAF_SECTION_URL,
-            SEQUENCE_NUMBER, CHUNK_INDEX, TOTAL_CHUNKS,
-        )
-
-        private fun Map<String, Any?>.longOrNull(key: String): Long? =
-            when (val v = this[key]) {
-                is Number -> v.toLong()
-                is String -> v.toLongOrNull()
-                else -> null
-            }
 
         fun from(chunk: Chunk, embedding: List<Float>? = null): ChunkNode {
-            val md = chunk.metadata
+            val structure = chunk.structure
             return ChunkNode(
                 id = chunk.id,
                 text = chunk.text,
                 urtext = chunk.urtext,
                 parentId = chunk.parentId,
                 uri = chunk.uri,
-                rootDocumentId = md[ROOT_DOCUMENT_ID] as? String,
-                containerSectionId = md[CONTAINER_SECTION_ID] as? String,
-                containerSectionTitle = md[CONTAINER_SECTION_TITLE] as? String,
-                leafSectionId = md[LEAF_SECTION_ID] as? String,
-                leafSectionTitle = md[LEAF_SECTION_TITLE] as? String,
-                leafSectionUrl = md[LEAF_SECTION_URL] as? String,
-                sequenceNumber = md.longOrNull(SEQUENCE_NUMBER),
-                chunkIndex = md.longOrNull(CHUNK_INDEX),
-                totalChunks = md.longOrNull(TOTAL_CHUNKS),
+                rootDocumentId = structure.rootDocumentId,
+                containerSectionId = structure.containerSectionId,
+                containerSectionTitle = structure.containerSectionTitle,
+                containerSectionUrl = structure.containerSectionUrl,
+                leafSectionId = structure.leafSectionId,
+                leafSectionTitle = structure.leafSectionTitle,
+                leafSectionUrl = structure.leafSectionUrl,
+                sequenceNumber = structure.sequenceNumber?.toLong(),
+                chunkIndex = structure.chunkIndex?.toLong(),
+                totalChunks = structure.totalChunks?.toLong(),
                 embedding = embedding,
-                freeFormMetadata = md.filterKeys { it !in STRUCTURAL_KEYS },
+                // Belt and braces: core's factories already lift structural keys out of metadata, so
+                // this is a no-op for any chunk built through them — but a hand-rolled Chunk impl
+                // could still carry them, and they must not be duplicated into the bag.
+                freeFormMetadata = ChunkStructure.withoutStructuralKeys(chunk.metadata),
             )
         }
     }
