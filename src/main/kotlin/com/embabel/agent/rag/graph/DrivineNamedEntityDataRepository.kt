@@ -37,6 +37,9 @@ import org.drivine.manager.GraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.drivine.mapper.RowMapper
 import org.drivine.query.QuerySpecification
+import org.drivine.schema.FullTextIndexSpec
+import org.drivine.schema.SimilarityFunction
+import org.drivine.schema.VectorIndexSpec
 
 /**
  * Drivine-based implementation of [NamedEntityDataRepository] for Cypher graph databases.
@@ -52,8 +55,11 @@ import org.drivine.query.QuerySpecification
  *
  * ## Indexing
  * This repository relies on vector and full-text indexes created on nodes with the
- * [GraphRagServiceProperties.entityNodeName] label (default: "Entity"). These indexes
- * are provisioned by [DrivineStore.provision].
+ * [GraphRagServiceProperties.entityNodeName] label (default: "Entity"). It provisions them
+ * itself at construction time (see [verifyIndexes]) rather than depending on a store to have
+ * done it: [DrivineStore] declares the same two indexes, but an application whose primary store
+ * is [GraphObjectManagerStore] never constructs one and would leave every entity search failing
+ * against an index nobody created.
  *
  * When saving entities, this repository automatically ensures that
  * [GraphRagServiceProperties.entityNodeName] is included in the node's labels,
@@ -66,8 +72,9 @@ import org.drivine.query.QuerySpecification
  * @param queryResolver Resolver for loading Cypher queries from external files
  * @param namedEntityDataMapper Row mapper for converting query results to [NamedEntityData]
  * @param namedEntityDataSimilarityMapper Row mapper for similarity search results
- * @param verifyIndexes If true (default), verifies required indexes exist at construction time
- *        and logs a warning if they are missing
+ * @param verifyIndexes If true (default), ensures the required entity indexes exist at
+ *        construction time, creating them if they are missing and warning if they cannot be
+ *        created. Set false for narrowed copies and for tests with no live database.
  */
 data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
     private val persistenceManager: PersistenceManager,
@@ -111,8 +118,8 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
 
     init {
         if (verifyIndexes && narrowingClause == null) {
-            // Only verify indexes for the root repository, not narrowed copies
-            verifyRequiredIndexes()
+            // Only the root repository owns the schema; narrowed copies are views of it.
+            ensureRequiredIndexes()
         }
     }
 
@@ -161,28 +168,48 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
     override fun withContextScope(contextId: String): DrivineNamedEntityDataRepository =
         narrowedBy("EXISTS { (n)<-[:MENTIONS]-(:Proposition {contextId: '$contextId'}) }")
 
-    private fun verifyRequiredIndexes() {
-        val requiredIndexes = listOf(properties.entityIndex, properties.entityFullTextIndex)
+    /**
+     * The entity schema this repository's searches bind by name: [entityVectorSearch] passes
+     * `properties.entityIndex` to `db.index.vector.queryNodes` and the text search passes
+     * `properties.entityFullTextIndex`. Nothing else in a deployment need create them — the only
+     * other declaration is [DrivineStore]'s, and an application whose primary store is
+     * [GraphObjectManagerStore] never constructs one (that store models no entities, so it
+     * provisions no entity indexes — see [GraphProvisioner]). This repository is the component
+     * that requires these indexes, so it is the component that creates them.
+     */
+    private val entityVectorIndex
+        get() = VectorIndexSpec(
+            properties.entityNodeName, "embedding", embeddingService.dimensions,
+            SimilarityFunction.COSINE, properties.entityIndex,
+        )
+
+    private val entityFullTextIndex
+        get() = FullTextIndexSpec(
+            properties.entityNodeName, listOf("name", "description"), properties.entityFullTextIndex,
+        )
+
+    /**
+     * Create the entity indexes if they are absent, idempotently — [GraphProvisioner.ensureSchema]
+     * matches an existing index by `(label, properties)`, so a database already carrying them is
+     * left alone.
+     *
+     * Never fatal. A read-only database, a driver that cannot answer yet, or a user without schema
+     * privileges are all reasons an application can still boot and serve everything that is not
+     * entity search; failing construction here would take the whole context down with it. The
+     * warning names the two indexes so the operator can create them by hand.
+     */
+    private fun ensureRequiredIndexes() {
         try {
-            val statement = "SHOW INDEXES YIELD name RETURN collect(name) AS indexNames"
-
-            @Suppress("UNCHECKED_CAST")
-            val existingIndexes = persistenceManager.getOne(
-                QuerySpecification
-                    .withStatement(statement)
-                    .transform(List::class.java)
-            ) as List<String>
-
-            val missingIndexes = requiredIndexes.filter { it !in existingIndexes }
-            if (missingIndexes.isNotEmpty()) {
-                logger.warn(
-                    "Required indexes not found: {}. Run DrivineStore.provision() to create them. " +
-                            "Search operations will fail until indexes are created.",
-                    missingIndexes
-                )
-            }
+            GraphProvisioner(persistenceManager).ensureSchema(
+                vectorIndexes = listOf(entityVectorIndex),
+                fullTextIndexes = listOf(entityFullTextIndex),
+                constraints = emptyList(),
+            )
         } catch (e: Exception) {
-            logger.warn("Could not verify indexes: {}. Ensure indexes exist before using search operations.", e.message)
+            logger.warn(
+                "Could not ensure entity indexes {} and {}: {}. Entity search will fail until they exist.",
+                properties.entityIndex, properties.entityFullTextIndex, e.message,
+            )
         }
     }
 
