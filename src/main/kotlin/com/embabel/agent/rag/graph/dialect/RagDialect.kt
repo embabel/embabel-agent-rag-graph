@@ -34,6 +34,28 @@ interface RagDialect {
     val name: String
 
     /**
+     * Raw fulltext score that normalizes to 0.5, inlined into the fulltext Cypher
+     * templates as `score / (score + k)`.
+     *
+     * Fulltext scores are unbounded, so they must be mapped onto `[0, 1)` before
+     * `$similarityThreshold` can be applied. These templates used to divide by the
+     * MAXIMUM score in the result set, which meant the top hit always scored exactly
+     * 1.0 no matter how poor it was — a threshold could never exclude a bad best-match
+     * — and the same document scored differently depending on what else happened to
+     * match, so scores were not comparable across queries.
+     *
+     * `score / (score + k)` is strictly monotonic (ranking is preserved exactly),
+     * bounded, and depends only on the document's own score. Raise `k` if your corpus
+     * produces large raw scores and everything saturates near 1.0.
+     *
+     * Kept in sync with `com.embabel.agent.rag.service.support.Bm25Normalization` in
+     * `embabel-agent-rag-core`, which applies the same transform for in-process stores.
+     * Inlined as a literal rather than bound as a parameter so that existing call sites,
+     * which build their own bind-parameter maps, need no change.
+     */
+    val bm25K: Double get() = DEFAULT_BM25_K
+
+    /**
      * Returns the Cypher query template for chunk vector search.
      *
      * Available parameters: `$vectorIndex`, `$chunkLabel`, `$topK`,
@@ -96,6 +118,9 @@ interface RagDialect {
     fun embeddingLiteral(paramName: String): String = "\$$paramName"
 
     companion object {
+
+        /** Default for [bm25K]. Mirrors `Bm25Normalization.DEFAULT_K` in rag-core. */
+        const val DEFAULT_BM25_K: Double = 3.0
 
         fun forDatabaseType(type: DatabaseType): RagDialect = when (type) {
             DatabaseType.NEO4J -> Neo4jRagDialect()

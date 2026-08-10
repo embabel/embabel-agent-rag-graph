@@ -54,10 +54,7 @@ class FalkorDbRagDialect : RagDialect {
     override fun chunkFullTextSearchCypher(): String = """
         CALL db.idx.fulltext.queryNodes(${'$'}chunkLabel, ${'$'}searchText)
         YIELD node AS chunk, score
-        WITH collect({node: chunk, score: score}) AS results, max(score) AS maxScore
-        UNWIND results AS result
-        WITH result.node AS chunk,
-             CASE WHEN maxScore > 0 THEN result.score / maxScore ELSE 1.0 END AS normalizedScore
+        WITH chunk, score / (score + $bm25K) AS normalizedScore
           WHERE normalizedScore >= ${'$'}similarityThreshold
         RETURN {
                  text: chunk.text,
@@ -87,15 +84,12 @@ class FalkorDbRagDialect : RagDialect {
         CALL db.idx.fulltext.queryNodes(${'$'}entityNodeName, ${'$'}searchText)
         YIELD node AS m, score
         WHERE score IS NOT NULL AND any(label IN labels(m) WHERE label IN ${'$'}labels)
-        WITH collect({node: m, score: score}) AS results, max(score) AS maxScore
-          WHERE maxScore IS NOT NULL
-        UNWIND results AS result
-        WITH result.node AS match,
-             CASE WHEN maxScore > 0 THEN result.score / maxScore ELSE 1.0 END AS score,
-             result.node.name AS name,
-             result.node.description AS description,
-             result.node.id AS id,
-             labels(result.node) AS labels
+        WITH m AS match,
+             score / (score + $bm25K) AS score,
+             m.name AS name,
+             m.description AS description,
+             m.id AS id,
+             labels(m) AS labels
           WHERE score >= ${'$'}similarityThreshold
         RETURN {
                  name:        COALESCE(name, ''),

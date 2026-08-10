@@ -17,6 +17,7 @@ package com.embabel.agent.rag.graph
 
 import com.embabel.agent.filter.PropertyFilter
 import com.embabel.agent.rag.filter.EntityFilter
+import com.embabel.agent.rag.graph.dialect.RagDialect
 import com.embabel.agent.rag.graph.model.ChunkExpandView
 import com.embabel.agent.rag.graph.model.ChunkNode
 import com.embabel.agent.rag.graph.model.ContainerSectionNode
@@ -70,6 +71,12 @@ import org.drivine.schema.VectorIndexSpec
 
 /** Window size for [GraphObjectManagerStore.reembedChunks] — bounds heap and per-request embedding size. */
 private const val REEMBED_BATCH_SIZE = 256
+
+/**
+ * A threshold above this requires a raw full-text score above [RagDialect.DEFAULT_BM25_K] — already
+ * a strong match. Empty results above it are far more likely a mis-set threshold than an empty corpus.
+ */
+private const val FULL_TEXT_SUPPRESSION_WARNING_THRESHOLD: Double = 0.5
 
 /**
  * A [Chunk]-focused RAG store backed by Drivine's [GraphObjectManager] and the `@NodeFragment` models
@@ -262,6 +269,32 @@ class GraphObjectManagerStore(
         if (query.isBlank()) emptyList()
         else gom.loadMatching<ChunkNode>(query, topK, threshold)
             .map { SimilarityResult.create(it.value.toCoreType(), it.score) }
+            .also { warnIfThresholdSuppressedResults(query, threshold, it.size) }
+
+    /**
+     * Explain an empty full-text result set that the caller's threshold most likely caused.
+     *
+     * Full-text scores are normalized in the dialect Cypher as `score/(score + [RagDialect.bm25K])`.
+     * A caller carrying a cosine-calibrated threshold ([RagRequest] defaults to 0.8) now filters
+     * everything out where it previously filtered nothing — say so rather than returning a silent
+     * empty list.
+     *
+     * Deliberately local rather than shared with rag-core's `Bm25Normalization`: this module
+     * compiles against the published agent artifact, which need not carry that class yet.
+     */
+    private fun warnIfThresholdSuppressedResults(query: String, threshold: Double, resultCount: Int) {
+        if (resultCount == 0 && threshold > FULL_TEXT_SUPPRESSION_WARNING_THRESHOLD) {
+            logger.warn(
+                """
+                Full-text search for '{}' returned no results with similarityThreshold={}.
+                Full-text scores are normalized to [0, 1) as score/(score+{}), so a threshold this high
+                demands a very strong raw match — thresholds calibrated for cosine similarity do not
+                transfer. Lower or omit the threshold and let topK rank.
+                """.trimIndent(),
+                query, threshold, RagDialect.DEFAULT_BM25_K,
+            )
+        }
+    }
 
     // ----- RagFacetProvider -----
 
