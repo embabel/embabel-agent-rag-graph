@@ -123,9 +123,18 @@ class GraphObjectManagerStore(
      * `gom.loadNearest` / `gom.loadMatching` resolve — so provisioning and search agree with no name
      * literal to keep in sync.
      */
-    private val chunkVectorIndex = VectorIndexSpec(
-        properties.chunkNodeName, "embedding", embeddingService.dimensions, SimilarityFunction.COSINE,
-    )
+    // `by lazy`, because `dimensions` interrogates the embedding service and a deployment may
+    // legitimately have none yet — one whose provider key arrives at first-run setup rather
+    // than at boot. Reading it in a constructor-body initializer made merely CONSTRUCTING the
+    // store fail there, which took down the whole application context; every consumer of an
+    // absent embedding service should fail at the point of use instead. The dimension is only
+    // meaningful when an index is actually provisioned or searched, which is when this now
+    // resolves.
+    private val chunkVectorIndex by lazy {
+        VectorIndexSpec(
+            properties.chunkNodeName, "embedding", embeddingService.dimensions, SimilarityFunction.COSINE,
+        )
+    }
     private val chunkFullTextIndex = FullTextIndexSpec(properties.chunkNodeName, listOf("text"))
 
     private val provisioner = GraphProvisioner(persistenceManager)
