@@ -126,7 +126,7 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         if (narrowingClause == null) {
             // Only the root repository owns the schema; narrowed copies are views of it, and carry
             // this same provisioner through copy(), so the ensure is settled once per root.
-            // Expected to be a no-op on a BYOK deployment's first boot — see EntitySchemaProvisioner.
+            // A no-op where the embedding model is not configured yet — see EntitySchemaProvisioner.
             entitySchema.ensureOnce()
         }
     }
@@ -439,8 +439,8 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         metadataFilter: PropertyFilter?,
         entityFilter: EntityFilter?,
     ): List<SimilarityResult<NamedEntityData>> {
-        // The index this binds by name may not exist yet — see EntitySchemaProvisioner. Settled
-        // after the first successful attempt; an atomic read thereafter.
+        // The index this binds by name may not exist yet — see EntitySchemaProvisioner, including
+        // its limitation. Settled after the first successful attempt; an atomic read thereafter.
         entitySchema.ensureOnce()
         logger.info(
             "Executing text search: query='{}', topK={}, metadataFilter={}, propertyFilter={}",
@@ -475,8 +475,8 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         metadataFilter: PropertyFilter?,
         entityFilter: EntityFilter?,
     ): List<SimilarityResult<NamedEntityData>> {
-        // The index this binds by name may not exist yet — see EntitySchemaProvisioner. Settled
-        // after the first successful attempt; an atomic read thereafter.
+        // The index this binds by name may not exist yet — see EntitySchemaProvisioner, including
+        // its limitation. Settled after the first successful attempt; an atomic read thereafter.
         entitySchema.ensureOnce()
         val embedding = embeddingService.embed(request.query)
         logger.info(

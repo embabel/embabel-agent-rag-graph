@@ -34,30 +34,33 @@ import java.util.concurrent.atomic.AtomicBoolean
  * entity indexes — see [GraphProvisioner]) and would leave every entity search failing against an
  * index nobody created.
  *
- * ## Why this is a collaborator and not an `init` block
+ * ## When it runs
  *
- * Building the vector spec reads [EmbeddingService.dimensions], which interrogates a live embedding
- * model. In a **BYOK deployment there is no model at boot**: the provider credential is supplied by
- * the operator at first-run setup, after the application is already up and serving the screens they
- * type it into. A first boot therefore runs this cold *by design*, not by accident — so the attempt
- * cannot be fatal, and, just as importantly, it cannot be the only attempt. A one-shot constructor
- * ensure leaves entity search broken for the life of the process even after the key arrives.
- *
- * So the attempt is made at construction (where it succeeds on any already-configured deployment,
- * keeping boot-time provisioning) and **retried at the point of use** until one succeeds. The point
- * of use is also the first moment the dimension is meaningful.
+ * At construction, and again on each search until one attempt succeeds. Building the vector spec
+ * reads [EmbeddingService.dimensions], which interrogates a live embedding model, so a deployment
+ * whose provider credential has not arrived yet cannot provision at boot; making construction the
+ * only attempt would leave entity search broken for the life of the process.
  *
  * The repository is a `data class` whose narrowed views are `copy()`s; they carry this collaborator
  * with them, so [ensureOnce] is settled once per root repository rather than once per view.
  *
- * ## Not-yet versus never
+ * An engine with no schema management at all (Neptune, Postgres — Drivine's
+ * `UnsupportedSchemaGrammar` throws on every call, deliberately) can never succeed, so it is refused
+ * at construction rather than retried on every search forever.
  *
- * The retry exists for conditions that can resolve: no embedding model *yet*, a driver that cannot
- * answer *yet*. An engine with no schema management at all (Neptune, Postgres — Drivine's
- * `UnsupportedSchemaGrammar` throws on every call, deliberately) resolves never, and retrying it
- * would spend a failed round-trip on every search for the life of the process. That is a
- * configuration error, so it fails here, at construction: this repository binds its indexes by name
- * and cannot work on an engine that cannot have them.
+ * ## KNOWN LIMITATION — a wrong dimension is worse than no dimension
+ *
+ * Retrying assumes an unconfigured embedding model *fails*. If it instead returns a placeholder
+ * dimension, the first attempt succeeds with the wrong number, settles, and is never revisited — and
+ * [GraphProvisioner] reports the later mismatch as `EnsureResult.Drift`, which it logs and leaves in
+ * place. The index then survives every boot at the wrong dimension, behind a warning, with vector
+ * search quietly returning nothing.
+ *
+ * Provisioning must not run from a dimension it cannot vouch for. The fix is an explicit
+ * provisioning call made once the embedding configuration is known to be real, and a schema version
+ * keyed to the embedding model's identity so a change rebuilds the index instead of drifting
+ * (Drivine's `SchemaCatalog.withVersion`). Until that lands, this is a hazard on any deployment
+ * whose unconfigured embedding service answers rather than throws.
  *
  * @param enabled false disables all schema work, including the engine check — for tests with no live
  *        database, and for callers that manage the entity schema themselves.
@@ -92,10 +95,11 @@ class EntitySchemaProvisioner(
      * matches an existing index by `(label, properties)`, so a database already carrying them is left
      * alone. Cheap to call on every search: once an attempt succeeds this returns on an atomic read.
      *
-     * Never fatal, and never final. An absent embedding model (BYOK, pre-setup), a read-only
-     * database, a driver that cannot answer yet, or a user without schema privileges all leave the
-     * application able to serve everything that is not entity search — and all of them can resolve
-     * later, which is why a failed attempt leaves the flag unset and is tried again.
+     * Not fatal: a read-only database, a driver that cannot answer yet, or a user without schema
+     * privileges all leave the application able to serve everything that is not entity search. A
+     * failed attempt leaves the flag unset, so the next search tries again — see the limitation on
+     * the class: this is only sound while an unusable embedding model *fails* rather than answering
+     * with a placeholder dimension.
      */
     fun ensureOnce() {
         if (!enabled || ensured.get()) return

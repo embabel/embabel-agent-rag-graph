@@ -140,11 +140,14 @@ class Neo4jEntityIndexProvisioningTest {
     }
 
     /**
-     * The BYOK sequence, which is the one that actually bites: a deployment whose embedding provider
-     * credential arrives at first-run setup has no usable model while the context is coming up, so
-     * the boot-time provisioning attempt is expected to fail. What must NOT happen is that the
-     * failure is final — the operator enters their key, everything else lights up, and entity search
-     * stays broken against an index nobody ever went back to create.
+     * A deployment whose embedding provider credential arrives at first-run setup has no usable model
+     * while the context is coming up, so the boot-time provisioning attempt is expected to fail. What
+     * must NOT happen is that the failure is final — the operator enters their key, everything else
+     * lights up, and entity search stays broken against an index nobody ever went back to create.
+     *
+     * This covers the variant where the unconfigured model FAILS. The variant where it answers with a
+     * placeholder dimension is not covered here and is not handled by the code: that attempt succeeds
+     * at the wrong dimension and settles. See the limitation on EntitySchemaProvisioner.
      */
     @Test
     fun `a repository built before the embedding model exists provisions once it does`() {

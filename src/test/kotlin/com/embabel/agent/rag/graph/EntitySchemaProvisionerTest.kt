@@ -46,10 +46,9 @@ class EntitySchemaProvisionerTest {
         mockk<PersistenceManager>(relaxed = true) { every { this@mockk.type } returns type }
 
     /**
-     * A never, not a not-yet. The retry exists for conditions that resolve — an embedding model that
-     * arrives at first-run setup, a driver not ready yet. An engine with no schema management never
-     * resolves, and retrying it would spend a failed round-trip on every search forever, so it is
-     * refused where the operator can see it: at construction.
+     * A never, not a not-yet. An engine with no schema management can never satisfy an ensure, so
+     * retrying it would spend a failed round-trip on every search forever; it is refused where the
+     * operator can see it, at construction.
      */
     @Test
     fun `an engine with no schema management is refused at construction`() {
@@ -116,9 +115,14 @@ class EntitySchemaProvisionerTest {
     }
 
     /**
-     * The complement: while attempts keep failing, they keep being made. This is what turns a BYOK
-     * first boot from permanent breakage into a wait — and it is the behaviour that would silently
-     * revert to Rod's one-shot version if someone moved the flag.
+     * The complement: while attempts keep failing, they keep being made, so a condition that
+     * resolves later (a database that was read-only, a driver not ready) is picked up without a
+     * restart.
+     *
+     * Note what this does NOT cover: an embedding service that answers with a placeholder dimension
+     * instead of failing. That attempt *succeeds*, settles the flag, and writes an index at the
+     * wrong dimension — retrying cannot help, because there is nothing left to retry. See the
+     * limitation on EntitySchemaProvisioner.
      */
     @Test
     fun `a failing provisioner keeps trying`() {
