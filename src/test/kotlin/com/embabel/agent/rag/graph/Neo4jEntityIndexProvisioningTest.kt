@@ -28,6 +28,7 @@ import org.drivine.query.QuerySpecification
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import org.springframework.ai.embedding.EmbeddingModel
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
@@ -105,8 +106,18 @@ class Neo4jEntityIndexProvisioningTest {
             .transform(List::class.java),
     ) as List<String>).toSet()
 
+    /**
+     * Every test starts from a database with no entity indexes and provisions what it needs, so
+     * none of them can pass on work a previous one — or the context's own repository bean — left
+     * behind.
+     */
+    @BeforeEach
+    fun dropEntityIndexesBeforeEachTest() = dropEntityIndexes()
+
     @Test
     fun `constructing the repository creates the entity indexes it searches by name`() {
+        newRepository()
+
         val names = indexNames()
         assertTrue(properties.entityIndex in names, "vector index ${properties.entityIndex} in $names")
         assertTrue(
@@ -117,13 +128,11 @@ class Neo4jEntityIndexProvisioningTest {
 
     @Test
     fun `ensuring twice is a no-op — indexes already present are neither added nor recreated`() {
+        newRepository()
         val before = indexFingerprints()
-        DrivineNamedEntityDataRepository(
-            persistenceManager = pm,
-            properties = properties,
-            dataDictionary = DataDictionary.fromDomainTypes("test", emptyList()),
-            embeddingService = SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel()),
-        )
+
+        newRepository()
+
         assertEquals(
             before, indexFingerprints(),
             "a second construction added or recreated an index",
@@ -139,18 +148,8 @@ class Neo4jEntityIndexProvisioningTest {
      */
     @Test
     fun `a repository built before the embedding model exists provisions once it does`() {
-        // The context's own repository bean already provisioned; drop back to a virgin database so
-        // this test observes ITS repository's work and not that one's. The search below restores
-        // them, leaving the database as the other tests expect it.
-        dropEntityIndexes()
-
         val model = LateInitializedEmbeddingModel()
-        val repository = DrivineNamedEntityDataRepository(
-            persistenceManager = pm,
-            properties = properties,
-            dataDictionary = DataDictionary.fromDomainTypes("test", emptyList()),
-            embeddingService = SpringAiEmbeddingService("byok", "embabel", model),
-        )
+        val repository = newRepository(model)
         // Construction survived the cold model — the context would have come up — and provisioned
         // nothing, because it could not: there is no dimension to declare a vector index with.
         assertTrue(model.dimensionsAsked > 0, "the cold model was never consulted; test proves nothing")
@@ -170,6 +169,76 @@ class Neo4jEntityIndexProvisioningTest {
             "full-text index ${properties.entityFullTextIndex} in $names",
         )
     }
+
+    /**
+     * Narrowed views are `copy()`s and carry the root's provisioner, so a search that arrives
+     * through one provisions just the same. Worth pinning because it is how searches mostly arrive
+     * in practice — `withContextScope(...)` — and because `narrowedBy` passes `verifyIndexes = false`,
+     * which used to mean a view could do no schema work at all.
+     */
+    @Test
+    fun `a search through a narrowed view provisions too`() {
+        val model = LateInitializedEmbeddingModel()
+        val repository = newRepository(model)
+        assertTrue(properties.entityIndex !in indexNames(), "nothing provisioned while the model was cold")
+
+        model.keyArrived = true
+        repository.withContextScope("some-context").textSearch(TextSimilaritySearchRequest("anything", 0.0, 1))
+
+        val names = indexNames()
+        assertTrue(properties.entityIndex in names, "vector index ${properties.entityIndex} in $names")
+        assertTrue(
+            properties.entityFullTextIndex in names,
+            "full-text index ${properties.entityFullTextIndex} in $names",
+        )
+    }
+
+    /**
+     * The vector path provisions as well as the text path — and ordering matters: the ensure runs
+     * before the query embedding, so a cold model fails at the embed rather than leaving a
+     * half-provisioned schema behind.
+     */
+    @Test
+    fun `the vector search path provisions too`() {
+        val model = LateInitializedEmbeddingModel()
+        val repository = newRepository(model)
+        assertTrue(properties.entityIndex !in indexNames(), "nothing provisioned while the model was cold")
+
+        model.keyArrived = true
+        repository.vectorSearch(TextSimilaritySearchRequest("anything", 0.0, 1))
+
+        assertTrue(properties.entityIndex in indexNames(), "the vector search provisioned its own index")
+    }
+
+    /**
+     * `verifyIndexes = false` is the escape hatch for a caller that provisions the entity schema
+     * itself. It has to hold on the search path too, or it is not an escape hatch.
+     */
+    @Test
+    fun `verifyIndexes false provisions nothing, at construction or on search`() {
+        val repository = newRepository(verifyIndexes = false)
+        assertTrue(properties.entityIndex !in indexNames(), "construction provisioned despite opting out")
+
+        // The search itself fails — there is no full-text index, which is the caller's business
+        // under this flag. What matters is that attempting it did not quietly create one.
+        runCatching { repository.textSearch(TextSimilaritySearchRequest("anything", 0.0, 1)) }
+
+        assertTrue(
+            properties.entityFullTextIndex !in indexNames(),
+            "the search provisioned despite opting out",
+        )
+    }
+
+    private fun newRepository(
+        model: EmbeddingModel = DeterministicEmbeddingModel(),
+        verifyIndexes: Boolean = true,
+    ) = DrivineNamedEntityDataRepository(
+        persistenceManager = pm,
+        properties = properties,
+        dataDictionary = DataDictionary.fromDomainTypes("test", emptyList()),
+        embeddingService = SpringAiEmbeddingService("fake", "embabel", model),
+        verifyIndexes = verifyIndexes,
+    )
 
     private fun dropEntityIndexes() {
         listOf(properties.entityIndex, properties.entityFullTextIndex).forEach { name ->

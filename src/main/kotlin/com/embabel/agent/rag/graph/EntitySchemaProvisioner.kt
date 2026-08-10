@@ -16,6 +16,8 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.common.ai.model.EmbeddingService
+import org.drivine.DrivineException
+import org.drivine.connection.DatabaseType
 import org.drivine.manager.PersistenceManager
 import org.drivine.schema.FullTextIndexSpec
 import org.drivine.schema.SimilarityFunction
@@ -48,8 +50,17 @@ import java.util.concurrent.atomic.AtomicBoolean
  * The repository is a `data class` whose narrowed views are `copy()`s; they carry this collaborator
  * with them, so [ensureOnce] is settled once per root repository rather than once per view.
  *
- * @param enabled false disables all schema work — for tests with no live database, and for callers
- *        that manage the entity schema themselves.
+ * ## Not-yet versus never
+ *
+ * The retry exists for conditions that can resolve: no embedding model *yet*, a driver that cannot
+ * answer *yet*. An engine with no schema management at all (Neptune, Postgres — Drivine's
+ * `UnsupportedSchemaGrammar` throws on every call, deliberately) resolves never, and retrying it
+ * would spend a failed round-trip on every search for the life of the process. That is a
+ * configuration error, so it fails here, at construction: this repository binds its indexes by name
+ * and cannot work on an engine that cannot have them.
+ *
+ * @param enabled false disables all schema work, including the engine check — for tests with no live
+ *        database, and for callers that manage the entity schema themselves.
  */
 class EntitySchemaProvisioner(
     private val persistenceManager: PersistenceManager,
@@ -63,6 +74,18 @@ class EntitySchemaProvisioner(
     private val provisioner = GraphProvisioner(persistenceManager)
 
     private val ensured = AtomicBoolean(false)
+
+    init {
+        if (enabled && persistenceManager.type !in SCHEMA_CAPABLE) {
+            throw DrivineException(
+                "${persistenceManager.type} has no schema management, so the entity indexes " +
+                    "'${properties.entityIndex}' and '${properties.entityFullTextIndex}' that entity " +
+                    "search binds by name cannot be created. Supported engines: " +
+                    SCHEMA_CAPABLE.joinToString { it.value } +
+                    ". Pass verifyIndexes = false if you provision the entity schema yourself."
+            )
+        }
+    }
 
     /**
      * Create the entity indexes if they are absent, idempotently — [GraphProvisioner.ensureSchema]
@@ -100,5 +123,10 @@ class EntitySchemaProvisioner(
                 properties.entityIndex, properties.entityFullTextIndex, e.message,
             )
         }
+    }
+
+    companion object {
+        /** Engines whose grammar can create the indexes entity search binds by name. */
+        private val SCHEMA_CAPABLE = setOf(DatabaseType.NEO4J, DatabaseType.MEMGRAPH, DatabaseType.FALKORDB)
     }
 }
