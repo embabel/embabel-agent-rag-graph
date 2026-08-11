@@ -37,9 +37,6 @@ import org.drivine.manager.GraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.drivine.mapper.RowMapper
 import org.drivine.query.QuerySpecification
-import org.drivine.schema.FullTextIndexSpec
-import org.drivine.schema.SimilarityFunction
-import org.drivine.schema.VectorIndexSpec
 
 /**
  * Drivine-based implementation of [NamedEntityDataRepository] for Cypher graph databases.
@@ -55,11 +52,11 @@ import org.drivine.schema.VectorIndexSpec
  *
  * ## Indexing
  * This repository relies on vector and full-text indexes created on nodes with the
- * [GraphRagServiceProperties.entityNodeName] label (default: "Entity"). It provisions them
- * itself at construction time (see [verifyIndexes]) rather than depending on a store to have
- * done it: [DrivineStore] declares the same two indexes, but an application whose primary store
- * is [GraphObjectManagerStore] never constructs one and would leave every entity search failing
- * against an index nobody created.
+ * [GraphRagServiceProperties.entityNodeName] label (default: "Entity"). It provisions them itself
+ * rather than depending on a store to have done it: [DrivineStore] declares the same two indexes,
+ * but an application whose primary store is [GraphObjectManagerStore] never constructs one and would
+ * leave every entity search failing against an index nobody created. See [EntitySchemaProvisioner]
+ * for when that provisioning happens and why it is attempted more than once.
  *
  * When saving entities, this repository automatically ensures that
  * [GraphRagServiceProperties.entityNodeName] is included in the node's labels,
@@ -72,9 +69,11 @@ import org.drivine.schema.VectorIndexSpec
  * @param queryResolver Resolver for loading Cypher queries from external files
  * @param namedEntityDataMapper Row mapper for converting query results to [NamedEntityData]
  * @param namedEntityDataSimilarityMapper Row mapper for similarity search results
- * @param verifyIndexes If true (default), ensures the required entity indexes exist at
- *        construction time, creating them if they are missing and warning if they cannot be
- *        created. Set false for narrowed copies and for tests with no live database.
+ * @param verifyIndexes If true (default), this repository owns the entity indexes it searches:
+ *        it creates them if they are missing, at construction and again on first search until an
+ *        attempt succeeds, warning rather than failing when it cannot. Set false for tests with no
+ *        live database, and for callers that manage the entity schema themselves. (The name predates
+ *        the behaviour — it verified once; renaming it would break named-argument callers.)
  */
 data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
     private val persistenceManager: PersistenceManager,
@@ -94,6 +93,17 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
      */
     private val narrowingClause: String? = null,
     private val additionalNativeFinder: NativeFinder = NativeFinder.NONE,
+    /**
+     * Owns the entity indexes this repository searches by name. Defaulted from the parameters above
+     * so no caller has to know it exists; carried by `copy()`, so narrowed views share the root's.
+     *
+     * The default closes over the injected [embeddingService], which is right for a deployment that
+     * has a model at construction. A BYOK host that wants provisioning to start working WITHOUT a
+     * restart should pass a provisioner whose supplier re-resolves — see [EntitySchemaProvisioner].
+     */
+    private val entitySchema: EntitySchemaProvisioner = EntitySchemaProvisioner(
+        persistenceManager, properties, { embeddingService }, enabled = verifyIndexes,
+    ),
 ) : NamedEntityDataRepository {
 
     private val logger = loggerFor<DrivineNamedEntityDataRepository>()
@@ -117,9 +127,11 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         copy(additionalNativeFinder = additional)
 
     init {
-        if (verifyIndexes && narrowingClause == null) {
-            // Only the root repository owns the schema; narrowed copies are views of it.
-            ensureRequiredIndexes()
+        if (narrowingClause == null) {
+            // Only the root repository owns the schema; narrowed copies are views of it, and carry
+            // this same provisioner through copy(), so the ensure is settled once per root.
+            // A no-op where the embedding model is not configured yet — see EntitySchemaProvisioner.
+            entitySchema.ensureOnce()
         }
     }
 
@@ -167,51 +179,6 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
      */
     override fun withContextScope(contextId: String): DrivineNamedEntityDataRepository =
         narrowedBy("EXISTS { (n)<-[:MENTIONS]-(:Proposition {contextId: '$contextId'}) }")
-
-    /**
-     * The entity schema this repository's searches bind by name: [entityVectorSearch] passes
-     * `properties.entityIndex` to `db.index.vector.queryNodes` and the text search passes
-     * `properties.entityFullTextIndex`. Nothing else in a deployment need create them — the only
-     * other declaration is [DrivineStore]'s, and an application whose primary store is
-     * [GraphObjectManagerStore] never constructs one (that store models no entities, so it
-     * provisions no entity indexes — see [GraphProvisioner]). This repository is the component
-     * that requires these indexes, so it is the component that creates them.
-     */
-    private val entityVectorIndex
-        get() = VectorIndexSpec(
-            properties.entityNodeName, "embedding", embeddingService.dimensions,
-            SimilarityFunction.COSINE, properties.entityIndex,
-        )
-
-    private val entityFullTextIndex
-        get() = FullTextIndexSpec(
-            properties.entityNodeName, listOf("name", "description"), properties.entityFullTextIndex,
-        )
-
-    /**
-     * Create the entity indexes if they are absent, idempotently — [GraphProvisioner.ensureSchema]
-     * matches an existing index by `(label, properties)`, so a database already carrying them is
-     * left alone.
-     *
-     * Never fatal. A read-only database, a driver that cannot answer yet, or a user without schema
-     * privileges are all reasons an application can still boot and serve everything that is not
-     * entity search; failing construction here would take the whole context down with it. The
-     * warning names the two indexes so the operator can create them by hand.
-     */
-    private fun ensureRequiredIndexes() {
-        try {
-            GraphProvisioner(persistenceManager).ensureSchema(
-                vectorIndexes = listOf(entityVectorIndex),
-                fullTextIndexes = listOf(entityFullTextIndex),
-                constraints = emptyList(),
-            )
-        } catch (e: Exception) {
-            logger.warn(
-                "Could not ensure entity indexes {} and {}: {}. Entity search will fail until they exist.",
-                properties.entityIndex, properties.entityFullTextIndex, e.message,
-            )
-        }
-    }
 
     override val luceneSyntaxNotes: String
         get() = "Full support"
@@ -476,6 +443,9 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         metadataFilter: PropertyFilter?,
         entityFilter: EntityFilter?,
     ): List<SimilarityResult<NamedEntityData>> {
+        // The index this binds by name may not exist yet — see EntitySchemaProvisioner, including
+        // its limitation. Settled after the first successful attempt; an atomic read thereafter.
+        entitySchema.ensureOnce()
         logger.info(
             "Executing text search: query='{}', topK={}, metadataFilter={}, propertyFilter={}",
             request.query, request.topK, metadataFilter, entityFilter
@@ -509,6 +479,9 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         metadataFilter: PropertyFilter?,
         entityFilter: EntityFilter?,
     ): List<SimilarityResult<NamedEntityData>> {
+        // The index this binds by name may not exist yet — see EntitySchemaProvisioner, including
+        // its limitation. Settled after the first successful attempt; an atomic read thereafter.
+        entitySchema.ensureOnce()
         val embedding = embeddingService.embed(request.query)
         logger.info(
             "Executing vector search: query='{}', topK={}, metadataFilter={}, propertyFilter={}",
