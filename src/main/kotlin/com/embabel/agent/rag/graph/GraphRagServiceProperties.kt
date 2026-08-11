@@ -34,7 +34,22 @@ class GraphRagServiceProperties {
     var contentElementFullTextIndex: String = "embabel_content_fulltext_index"
     var entityFullTextIndex: String = "embabel_entity_fulltext_index"
 
+    /**
+     * Whether full-text queries have their identifier-shaped tokens promoted to *required* terms
+     * before they reach the index — so `what causes ER20328_23` retrieves the chunk containing that
+     * code rather than everything sharing a common word with the question.
+     *
+     * On by default: full-text search exists for the retrieval a vector index cannot do, and this is
+     * what makes it precise. A required term matching nothing falls back to the original query, so
+     * recall cannot regress.
+     *
+     * Assumes Lucene-compatible query syntax, which holds for Neo4j full-text indexes and Memgraph's
+     * Tantivy-backed `text_search`. Set false for engines whose full-text syntax differs, such as
+     * RediSearch-backed FalkorDB.
+     */
+    var requireIdentifierTerms: Boolean = true
+
     override fun toString(): String {
-        return "${javaClass.simpleName}(chunkNodeName='$chunkNodeName', entityNodeName='$entityNodeName', name='$name', description='$description', contentElementIndex='$contentElementIndex', entityIndex='$entityIndex', contentElementFullTextIndex='$contentElementFullTextIndex', entityFullTextIndex='$entityFullTextIndex')"
+        return "${javaClass.simpleName}(chunkNodeName='$chunkNodeName', entityNodeName='$entityNodeName', name='$name', description='$description', contentElementIndex='$contentElementIndex', entityIndex='$entityIndex', contentElementFullTextIndex='$contentElementFullTextIndex', entityFullTextIndex='$entityFullTextIndex', requireIdentifierTerms=$requireIdentifierTerms)"
     }
 }

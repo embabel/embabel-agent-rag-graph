@@ -18,6 +18,7 @@ package com.embabel.agent.rag.graph
 import com.embabel.agent.core.DataDictionary
 import com.embabel.agent.filter.PropertyFilter
 import com.embabel.agent.rag.filter.EntityFilter
+import com.embabel.agent.rag.graph.fulltext.searchRequiringIdentifiers
 import com.embabel.agent.rag.model.NamedEntityData
 import com.embabel.agent.rag.model.RelationshipDirection
 import com.embabel.agent.rag.graph.mappers.NamedEntityDataRowMapper
@@ -186,8 +187,15 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         }
     }
 
+    // Reaches the LLM verbatim via TextSearchTools' description. "Full support" was true and useless:
+    // it named a capability without telling the model what to type. See GraphObjectManagerStore.
     override val luceneSyntaxNotes: String
-        get() = "Full support"
+        get() = """
+            Full Lucene syntax: +term (required), -term (excluded), "exact phrase", term* (prefix),
+            term~ (fuzzy). Prefer this tool over vector search for exact strings an embedding cannot
+            represent — identifiers, codes, reference numbers. Such tokens are required automatically,
+            so you may pass the user's question as-is.
+        """.trimIndent()
 
     override fun createRelationship(
         a: RetrievableIdentifier,
@@ -459,20 +467,24 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         val combinedFilterResult = combineFilters(metadataFilter, entityFilter)
         val statement = injectFilterIntoQuery(baseStatement, combinedFilterResult, "n")
 
-        val params = mapOf(
-            "fulltextIndex" to properties.entityFullTextIndex,
-            "searchText" to request.query,
-            "similarityThreshold" to request.similarityThreshold,
-            "topK" to request.topK,
-            "entityNodeName" to properties.entityNodeName,
-        ) + combinedFilterResult.parameters
+        // Same treatment as chunk full-text: an entity named by an identifier is exactly the lookup a
+        // vector index cannot serve, so the identifier decides membership rather than the score.
+        val results = searchRequiringIdentifiers(request.query, properties.requireIdentifierTerms) { searchText ->
+            val params = mapOf(
+                "fulltextIndex" to properties.entityFullTextIndex,
+                "searchText" to searchText,
+                "similarityThreshold" to request.similarityThreshold,
+                "topK" to request.topK,
+                "entityNodeName" to properties.entityNodeName,
+            ) + combinedFilterResult.parameters
 
-        val results = persistenceManager.query(
-            QuerySpecification
-                .withStatement(statement)
-                .bind(params)
-                .mapWith(namedEntityDataSimilarityMapper)
-        )
+            persistenceManager.query(
+                QuerySpecification
+                    .withStatement(statement)
+                    .bind(params)
+                    .mapWith(namedEntityDataSimilarityMapper)
+            )
+        }
         logger.info("{} text search results for query '{}'", results.size, request.query)
         return results
     }
