@@ -121,6 +121,30 @@ class CypherFilterConverterTest {
             assertEquals("NOT e.status IN \$_filter_0", result.whereClause)
             assertEquals(mapOf("_filter_0" to listOf("deleted", "archived")), result.parameters)
         }
+
+        @Test
+        fun `HasElement converts to membership in a list property`() {
+            val result = converter.convert(PropertyFilter.hasElement("visibleTo", "bob"))
+
+            assertEquals("\$_filter_0 IN e.visibleTo", result.whereClause)
+            assertEquals(mapOf("_filter_0" to "bob"), result.parameters)
+        }
+
+        @Test
+        fun `HasElement composes inside Or`() {
+            val result = converter.convert(
+                PropertyFilter.or(
+                    eq("ingestedBy", "alice"),
+                    PropertyFilter.hasElement("visibleTo", "bob"),
+                ),
+            )
+
+            assertEquals(
+                "(e.ingestedBy = \$_filter_0) OR (\$_filter_1 IN e.visibleTo)",
+                result.whereClause,
+            )
+            assertEquals(mapOf("_filter_0" to "alice", "_filter_1" to "bob"), result.parameters)
+        }
     }
 
     @Nested
