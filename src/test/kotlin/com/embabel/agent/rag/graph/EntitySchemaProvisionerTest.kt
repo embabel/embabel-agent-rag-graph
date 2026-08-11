@@ -153,7 +153,7 @@ class EntitySchemaProvisionerTest {
 
         assertEquals(
             0, placeholder.dimensionReads,
-            "read a dimension from a placeholder — awaitingKey was not honoured, and only the " +
+            "read a dimension from a placeholder — awaitingProviderKey was not honoured, and only the " +
                 "exception stopped an index being built",
         )
         verify(exactly = 0) { pm.indexes }
@@ -163,7 +163,7 @@ class EntitySchemaProvisionerTest {
     /**
      * And through a decorator, which is the normal case rather than an exotic one: the platform's
      * event tracking already wraps the configured service, and this repo's own host wraps it again
-     * to hot-swap the model. `awaitingKey` rides through `by` delegation; a type test would not.
+     * to hot-swap the model. `awaitingProviderKey` rides through `by` delegation; a type test would not.
      */
     @Test
     fun `a wrapped placeholder provisions nothing either`() {
@@ -173,7 +173,7 @@ class EntitySchemaProvisionerTest {
 
         EntitySchemaProvisioner(pm, properties, { Wrapper(Wrapper(placeholder)) }).ensureOnce()
 
-        assertEquals(0, placeholder.dimensionReads, "the decorator hid awaitingKey")
+        assertEquals(0, placeholder.dimensionReads, "the decorator hid awaitingProviderKey")
         verify(exactly = 0) { pm.indexes }
         verify(exactly = 0) { pm.constraints }
     }
@@ -211,7 +211,7 @@ class EntitySchemaProvisionerTest {
     /** The platform's placeholder: carries the marker, and refuses to report a dimension. */
     /**
      * Counts dimension reads, because "provisioned nothing" is too weak to prove anything: a
-     * provisioner that ignored [awaitingKey] would read the dimension, throw, be caught, and also
+     * provisioner that ignored [awaitingProviderKey] would read the dimension, throw, be caught, and also
      * provision nothing. The contract is that the placeholder is ASKED and never CALLED, so the
      * discriminating assertion is that no one read a dimension we cannot vouch for.
      */
@@ -219,7 +219,7 @@ class EntitySchemaProvisionerTest {
         var dimensionReads = 0
             private set
 
-        override val awaitingKey = true
+        override val awaitingProviderKey = true
         override val name = "setup-required-embedding"
         override val provider = "none"
         override val pricingModel: PricingModel? = null

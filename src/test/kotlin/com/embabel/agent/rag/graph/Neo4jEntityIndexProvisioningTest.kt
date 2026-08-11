@@ -237,7 +237,7 @@ class Neo4jEntityIndexProvisioningTest {
     /**
      * The BYOK shape as the platform actually produces it. The cold-model tests above use a service
      * that THROWS, which was the old failure mode; a keyless deployment now resolves a placeholder
-     * that answers `awaitingKey` and refuses to report a dimension. Nothing may be provisioned from
+     * that answers `awaitingProviderKey` and refuses to report a dimension. Nothing may be provisioned from
      * it, and — the part a throwing double cannot show — nothing may be provisioned by catching it
      * either, since the placeholder is asked, never called.
      */
@@ -281,7 +281,7 @@ class Neo4jEntityIndexProvisioningTest {
         override val name = "setup-required-embedding"
         override val provider = "none"
         override val pricingModel: PricingModel? = null
-        override val awaitingKey = true
+        override val awaitingProviderKey = true
         override fun embed(text: String): FloatArray = error("no embedding service configured")
         override fun embed(texts: List<String>): List<FloatArray> = error("no embedding service configured")
         override val dimensions: Int
