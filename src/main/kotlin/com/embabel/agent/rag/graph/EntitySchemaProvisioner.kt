@@ -15,7 +15,6 @@
  */
 package com.embabel.agent.rag.graph
 
-import com.embabel.agent.spi.PlaceholderEmbeddingService
 import com.embabel.common.ai.model.EmbeddingService
 import org.drivine.DrivineException
 import org.drivine.connection.DatabaseType
@@ -43,11 +42,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * reports that later mismatch as `EnsureResult.Drift`, which it logs and leaves in place — so a
  * wrong dimension survives every boot behind a warning nobody reads.
  *
- * So the question asked here is **whether there is a model yet**, not whether reading it happens to
- * throw. A BYOK deployment resolves [PlaceholderEmbeddingService] until its provider credential
- * arrives; this skips while that is what it holds. Testing the marker rather than catching an
- * exception matters: a failure cannot be told apart from a provider that is merely unreachable
- * right now, and a placeholder that answered with a plausible number would not fail at all.
+ * So the question asked here is [EmbeddingService.awaitingKey] — whether there is a model yet — not
+ * whether reading the dimension happens to throw. A failure cannot be told apart from a provider
+ * that is merely unreachable right now, and a placeholder that answered with a plausible number
+ * would not fail at all. The property rather than a type test, because the platform's own event
+ * tracking already decorates the configured service and a wrapper around a placeholder is not
+ * itself one.
  *
  * ## When it runs
  *
@@ -116,7 +116,7 @@ class EntitySchemaProvisioner(
     fun ensureOnce() {
         if (!enabled || ensured.get()) return
         val embeddings = embeddingService()
-        if (embeddings is PlaceholderEmbeddingService) {
+        if (embeddings.awaitingKey) {
             // No model yet, so no dimension anyone can vouch for. Skipping is the recoverable
             // answer: the next search re-checks, and provisions once a real model is resolved.
             logger.debug(

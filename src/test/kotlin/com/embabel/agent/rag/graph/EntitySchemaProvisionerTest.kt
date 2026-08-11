@@ -16,7 +16,6 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.agent.rag.graph.test.DeterministicEmbeddingModel
-import com.embabel.agent.spi.PlaceholderEmbeddingService
 import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.ai.model.PricingModel
 import com.embabel.common.ai.model.SpringAiEmbeddingService
@@ -155,6 +154,23 @@ class EntitySchemaProvisionerTest {
     }
 
     /**
+     * And through a decorator, which is the normal case rather than an exotic one: the platform's
+     * event tracking already wraps the configured service, and this repo's own host wraps it again
+     * to hot-swap the model. `awaitingKey` rides through `by` delegation; a type test would not.
+     */
+    @Test
+    fun `a wrapped placeholder provisions nothing either`() {
+        val pm = mockk<PersistenceManager>(relaxed = true) { every { type } returns DatabaseType.NEO4J }
+
+        EntitySchemaProvisioner(pm, properties, { Wrapper(Wrapper(PlaceholderEmbedding())) }).ensureOnce()
+
+        verify(exactly = 0) { pm.indexes }
+        verify(exactly = 0) { pm.constraints }
+    }
+
+    private class Wrapper(delegate: EmbeddingService) : EmbeddingService by delegate
+
+    /**
      * And the recovery that makes skipping acceptable rather than merely safe: the check is a type
      * test, so it costs nothing to repeat, and the attempt after a real model is resolved provisions
      * — no restart, which is what a deployment taking its key from a settings screen needs.
@@ -183,7 +199,8 @@ class EntitySchemaProvisionerTest {
     }
 
     /** The platform's placeholder: carries the marker, and refuses to report a dimension. */
-    private class PlaceholderEmbedding : EmbeddingService, PlaceholderEmbeddingService {
+    private class PlaceholderEmbedding : EmbeddingService {
+        override val awaitingKey = true
         override val name = "setup-required-embedding"
         override val provider = "none"
         override val pricingModel: PricingModel? = null
