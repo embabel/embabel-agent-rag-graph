@@ -16,6 +16,9 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.agent.rag.graph.test.DeterministicEmbeddingModel
+import com.embabel.agent.spi.PlaceholderEmbeddingService
+import com.embabel.common.ai.model.EmbeddingService
+import com.embabel.common.ai.model.PricingModel
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import io.mockk.every
 import io.mockk.mockk
@@ -54,7 +57,7 @@ class EntitySchemaProvisionerTest {
     fun `an engine with no schema management is refused at construction`() {
         listOf(DatabaseType.NEPTUNE, DatabaseType.POSTGRES).forEach { type ->
             val e = assertThrows(DrivineException::class.java) {
-                EntitySchemaProvisioner(persistenceManager(type), properties, embeddingService)
+                EntitySchemaProvisioner(persistenceManager(type), properties, { embeddingService })
             }
             assertTrue(type.value in e.message!!, "message names the engine: ${e.message}")
             assertTrue(
@@ -68,7 +71,7 @@ class EntitySchemaProvisionerTest {
     fun `schema-capable engines are accepted`() {
         listOf(DatabaseType.NEO4J, DatabaseType.MEMGRAPH, DatabaseType.FALKORDB).forEach { type ->
             assertDoesNotThrow {
-                EntitySchemaProvisioner(persistenceManager(type), properties, embeddingService)
+                EntitySchemaProvisioner(persistenceManager(type), properties, { embeddingService })
             }
         }
     }
@@ -82,7 +85,7 @@ class EntitySchemaProvisionerTest {
         val pm = persistenceManager(DatabaseType.NEPTUNE)
 
         val provisioner = assertDoesNotThrow {
-            EntitySchemaProvisioner(pm, properties, embeddingService, enabled = false)
+            EntitySchemaProvisioner(pm, properties, { embeddingService }, enabled = false)
         }
         provisioner.ensureOnce()
 
@@ -107,7 +110,7 @@ class EntitySchemaProvisionerTest {
             every { indexes } returns indexManager
         }
 
-        val provisioner = EntitySchemaProvisioner(pm, properties, embeddingService)
+        val provisioner = EntitySchemaProvisioner(pm, properties, { embeddingService })
         repeat(5) { provisioner.ensureOnce() }
 
         // One ensure per index — the vector index and the full-text index — and no more.
@@ -118,11 +121,6 @@ class EntitySchemaProvisionerTest {
      * The complement: while attempts keep failing, they keep being made, so a condition that
      * resolves later (a database that was read-only, a driver not ready) is picked up without a
      * restart.
-     *
-     * Note what this does NOT cover: an embedding service that answers with a placeholder dimension
-     * instead of failing. That attempt *succeeds*, settles the flag, and writes an index at the
-     * wrong dimension — retrying cannot help, because there is nothing left to retry. See the
-     * limitation on EntitySchemaProvisioner.
      */
     @Test
     fun `a failing provisioner keeps trying`() {
@@ -134,9 +132,73 @@ class EntitySchemaProvisionerTest {
             every { indexes } returns indexManager
         }
 
-        val provisioner = EntitySchemaProvisioner(pm, properties, embeddingService)
+        val provisioner = EntitySchemaProvisioner(pm, properties, { embeddingService })
         repeat(3) { provisioner.ensureOnce() }
 
         verify(exactly = 3) { indexManager.ensure(any()) }
     }
+
+    /**
+     * A BYOK deployment before its provider credential arrives resolves the platform's placeholder.
+     * Nothing may be provisioned from it — there is no dimension anyone can vouch for — and, just as
+     * important, nothing may be provisioned by CATCHING it either: the placeholder is checked, not
+     * called, so a schema commitment is never made from a failure.
+     */
+    @Test
+    fun `a placeholder embedding service provisions nothing and never touches the database`() {
+        val pm = mockk<PersistenceManager>(relaxed = true) { every { type } returns DatabaseType.NEO4J }
+
+        EntitySchemaProvisioner(pm, properties, { PlaceholderEmbedding() }).ensureOnce()
+
+        verify(exactly = 0) { pm.indexes }
+        verify(exactly = 0) { pm.constraints }
+    }
+
+    /**
+     * And the recovery that makes skipping acceptable rather than merely safe: the check is a type
+     * test, so it costs nothing to repeat, and the attempt after a real model is resolved provisions
+     * — no restart, which is what a deployment taking its key from a settings screen needs.
+     */
+    @Test
+    fun `once a real model replaces the placeholder the next attempt provisions`() {
+        val indexManager = mockk<IndexManager> {
+            every { ensure(any()) } answers { EnsureResult.Created(SchemaItemInfo.fromSpec(firstArg())) }
+        }
+        val pm = mockk<PersistenceManager>(relaxed = true) {
+            every { type } returns DatabaseType.NEO4J
+            every { indexes } returns indexManager
+        }
+        // What the platform resolves changes over time; the provisioner re-asks rather than holding
+        // the answer, which is the only way the key arriving can ever be noticed.
+        var resolved: EmbeddingService = PlaceholderEmbedding()
+
+        val provisioner = EntitySchemaProvisioner(pm, properties, { resolved })
+        provisioner.ensureOnce()
+        verify(exactly = 0) { indexManager.ensure(any()) }
+
+        resolved = RealEmbedding()
+        provisioner.ensureOnce()
+
+        verify(exactly = 2) { indexManager.ensure(any()) }
+    }
+
+    /** The platform's placeholder: carries the marker, and refuses to report a dimension. */
+    private class PlaceholderEmbedding : EmbeddingService, PlaceholderEmbeddingService {
+        override val name = "setup-required-embedding"
+        override val provider = "none"
+        override val pricingModel: PricingModel? = null
+        override fun embed(text: String): FloatArray = error("no embedding service configured")
+        override fun embed(texts: List<String>): List<FloatArray> = error("no embedding service configured")
+        override val dimensions: Int get() = error("no embedding service configured")
+    }
+
+    private class RealEmbedding : EmbeddingService {
+        override val name = "text-embedding-3-small"
+        override val provider = "acme"
+        override val pricingModel: PricingModel? = null
+        override fun embed(text: String): FloatArray = FloatArray(dimensions)
+        override fun embed(texts: List<String>): List<FloatArray> = texts.map { embed(it) }
+        override val dimensions = 1536
+    }
+
 }

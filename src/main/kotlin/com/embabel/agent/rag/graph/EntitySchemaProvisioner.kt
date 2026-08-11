@@ -15,6 +15,7 @@
  */
 package com.embabel.agent.rag.graph
 
+import com.embabel.agent.spi.PlaceholderEmbeddingService
 import com.embabel.common.ai.model.EmbeddingService
 import org.drivine.DrivineException
 import org.drivine.connection.DatabaseType
@@ -34,12 +35,32 @@ import java.util.concurrent.atomic.AtomicBoolean
  * entity indexes — see [GraphProvisioner]) and would leave every entity search failing against an
  * index nobody created.
  *
+ * ## Never provision from a dimension we cannot vouch for
+ *
+ * Building the vector spec reads [EmbeddingService.dimensions], and that number is a schema
+ * commitment: it becomes the shape of the index, writes to it succeed, and a model configured later
+ * that disagrees surfaces as empty search results rather than as an error. [GraphProvisioner]
+ * reports that later mismatch as `EnsureResult.Drift`, which it logs and leaves in place — so a
+ * wrong dimension survives every boot behind a warning nobody reads.
+ *
+ * So the question asked here is **whether there is a model yet**, not whether reading it happens to
+ * throw. A BYOK deployment resolves [PlaceholderEmbeddingService] until its provider credential
+ * arrives; this skips while that is what it holds. Testing the marker rather than catching an
+ * exception matters: a failure cannot be told apart from a provider that is merely unreachable
+ * right now, and a placeholder that answered with a plausible number would not fail at all.
+ *
  * ## When it runs
  *
- * At construction, and again on each search until one attempt succeeds. Building the vector spec
- * reads [EmbeddingService.dimensions], which interrogates a live embedding model, so a deployment
- * whose provider credential has not arrived yet cannot provision at boot; making construction the
- * only attempt would leave entity search broken for the life of the process.
+ * At construction, and again on each search until one attempt succeeds — the marker check is a type
+ * test, so repeating it costs nothing.
+ *
+ * The embedding service is taken as a **supplier, not an instance**, and that is load-bearing rather
+ * than stylistic. The marker lives on the object, so a held reference that is the placeholder stays
+ * the placeholder forever: re-checking it can never notice the key arriving, and recovery would need
+ * a restart. Re-resolving asks the platform each time, which answers the placeholder now and a real
+ * service once one is registered. A host that wants entity search to start working without a restart
+ * must pass a supplier that actually re-resolves — `{ modelProvider.getEmbeddingService(...) }` —
+ * rather than one closing over a value it captured at construction.
  *
  * The repository is a `data class` whose narrowed views are `copy()`s; they carry this collaborator
  * with them, so [ensureOnce] is settled once per root repository rather than once per view.
@@ -48,19 +69,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * `UnsupportedSchemaGrammar` throws on every call, deliberately) can never succeed, so it is refused
  * at construction rather than retried on every search forever.
  *
- * ## KNOWN LIMITATION — a wrong dimension is worse than no dimension
+ * ## Still open: a model that CHANGES
  *
- * Retrying assumes an unconfigured embedding model *fails*. If it instead returns a placeholder
- * dimension, the first attempt succeeds with the wrong number, settles, and is never revisited — and
- * [GraphProvisioner] reports the later mismatch as `EnsureResult.Drift`, which it logs and leaves in
- * place. The index then survives every boot at the wrong dimension, behind a warning, with vector
- * search quietly returning nothing.
- *
- * Provisioning must not run from a dimension it cannot vouch for. The fix is an explicit
- * provisioning call made once the embedding configuration is known to be real, and a schema version
- * keyed to the embedding model's identity so a change rebuilds the index instead of drifting
- * (Drivine's `SchemaCatalog.withVersion`). Until that lands, this is a hazard on any deployment
- * whose unconfigured embedding service answers rather than throws.
+ * The marker answers "is there a model yet", not "is it still the same one". A real model later
+ * swapped for one of a different width lands in the same drift the placeholder protects against.
+ * The fix is a schema version keyed to the embedding model's identity, so a change rebuilds the
+ * index rather than drifting (Drivine's `SchemaCatalog.withVersion`).
  *
  * @param enabled false disables all schema work, including the engine check — for tests with no live
  *        database, and for callers that manage the entity schema themselves.
@@ -68,7 +82,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class EntitySchemaProvisioner(
     private val persistenceManager: PersistenceManager,
     private val properties: GraphRagServiceProperties,
-    private val embeddingService: EmbeddingService,
+    private val embeddingService: () -> EmbeddingService,
     private val enabled: Boolean = true,
 ) {
 
@@ -97,17 +111,25 @@ class EntitySchemaProvisioner(
      *
      * Not fatal: a read-only database, a driver that cannot answer yet, or a user without schema
      * privileges all leave the application able to serve everything that is not entity search. A
-     * failed attempt leaves the flag unset, so the next search tries again — see the limitation on
-     * the class: this is only sound while an unusable embedding model *fails* rather than answering
-     * with a placeholder dimension.
+     * failed attempt leaves the flag unset, so the next search tries again.
      */
     fun ensureOnce() {
         if (!enabled || ensured.get()) return
+        val embeddings = embeddingService()
+        if (embeddings is PlaceholderEmbeddingService) {
+            // No model yet, so no dimension anyone can vouch for. Skipping is the recoverable
+            // answer: the next search re-checks, and provisions once a real model is resolved.
+            logger.debug(
+                "Awaiting an embedding model; entity indexes {} and {} not provisioned yet",
+                properties.entityIndex, properties.entityFullTextIndex,
+            )
+            return
+        }
         try {
             provisioner.ensureSchema(
                 vectorIndexes = listOf(
                     VectorIndexSpec(
-                        properties.entityNodeName, "embedding", embeddingService.dimensions,
+                        properties.entityNodeName, "embedding", embeddings.dimensions,
                         SimilarityFunction.COSINE, properties.entityIndex,
                     ),
                 ),

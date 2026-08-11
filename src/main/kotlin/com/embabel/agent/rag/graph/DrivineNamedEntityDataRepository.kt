@@ -96,9 +96,13 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
     /**
      * Owns the entity indexes this repository searches by name. Defaulted from the parameters above
      * so no caller has to know it exists; carried by `copy()`, so narrowed views share the root's.
+     *
+     * The default closes over the injected [embeddingService], which is right for a deployment that
+     * has a model at construction. A BYOK host that wants provisioning to start working WITHOUT a
+     * restart should pass a provisioner whose supplier re-resolves — see [EntitySchemaProvisioner].
      */
     private val entitySchema: EntitySchemaProvisioner = EntitySchemaProvisioner(
-        persistenceManager, properties, embeddingService, enabled = verifyIndexes,
+        persistenceManager, properties, { embeddingService }, enabled = verifyIndexes,
     ),
 ) : NamedEntityDataRepository {
 
