@@ -54,8 +54,31 @@ class FullTextSyntaxNotesTest {
         // Whitespace-normalised so re-wrapping the prose cannot fail the test for no reason.
         val notes = syntaxNotesFor(FullTextQueryMode.EXPRESSION).replace(Regex("\\s+"), " ")
         assertTrue(
-            notes.contains("Do NOT put + on ordinary words"),
+            notes.contains("NEVER put + on an ordinary word"),
             "must warn against over-requiring, not just ask for the identifier",
+        )
+        assertTrue(
+            notes.contains("never on more than one term"),
+            "one + is the norm; several ordinary words required together is what matched nothing",
+        )
+    }
+
+    @Test
+    @DisplayName("EXPRESSION tells the model what to do when there is nothing to require")
+    fun `expression notes cover the absent-identifier case`() {
+        // The gap that caused the regression. The previous wording said "typically one + per query"
+        // and "do not put + on ordinary words", and a model asked a question containing no
+        // identifier still required every word of it — `+registration +application +decide +how
+        // +long`, which matched zero chunks. Most questions have nothing to require, and the notes
+        // have to say so outright rather than leave it implied.
+        val notes = syntaxNotesFor(FullTextQueryMode.EXPRESSION).replace(Regex("\\s+"), " ")
+        assertTrue(
+            notes.contains("MOST QUESTIONS NEED NO + AT ALL"),
+            "the dominant case must lead, not be inferred from a prohibition",
+        )
+        assertTrue(
+            notes.contains("no identifier in the question, so no +"),
+            "needs a worked example of a plain question, not only of an identifier one",
         )
     }
 

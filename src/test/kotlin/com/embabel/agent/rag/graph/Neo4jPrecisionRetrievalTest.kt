@@ -327,4 +327,46 @@ class Neo4jPrecisionRetrievalTest {
             )
         }
     }
+
+    @Nested
+    @DisplayName("EXPRESSION cannot take retrieval to zero")
+    inner class ExpressionNeverGoesDark {
+
+        /**
+         * The regression this guards, end to end. A model asked a question containing no identifier
+         * required every word of it; the conjunction matched nothing, and because full-text was
+         * almost every tool call on that path, the whole retrieval step returned empty.
+         *
+         * Asserting on the returned CHUNKS rather than on the query string: the unit tests already
+         * pin the rewrite, and a string assertion would pass even if the fallback were never issued.
+         */
+        @Test
+        fun `a conjunction that cannot match falls back and still finds the chunk`() {
+            properties.queryMode = FullTextQueryMode.EXPRESSION
+
+            // "logs" appears only in a distractor, ER20328_23 only in the incident, so requiring
+            // BOTH matches nothing. An earlier version of this test required five words that the
+            // incident chunk happens to contain all of — it passed with the fix reverted, proving
+            // nothing. The conjunction has to be genuinely unsatisfiable for the fallback to be
+            // what recovers the result.
+            val hits = search("+ER20328_23 +logs")
+
+            assertEquals(
+                setOf(id(incident)), hits,
+                "the ordinary word relaxes and the identifier stays required, so the chunk carrying " +
+                    "the code is recovered rather than the caller getting nothing",
+            )
+        }
+
+        @Test
+        fun `an absent identifier still returns nothing`() {
+            // The other half of the trade. Relaxation must not turn an honest "not found" into junk.
+            properties.queryMode = FullTextQueryMode.EXPRESSION
+
+            assertTrue(
+                search("+ER99999_00 +payment +service", attempts = 2).isEmpty(),
+                "the identifier stays required, so a code absent from the corpus yields no chunks",
+            )
+        }
+    }
 }

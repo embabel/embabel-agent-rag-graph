@@ -31,24 +31,30 @@ package com.embabel.agent.rag.graph.fulltext
  */
 internal fun syntaxNotesFor(mode: FullTextQueryMode): String = when (mode) {
 
-    // Wording measured at 3/3 on gpt-4.1-mini, arrived at through three iterations. Two lessons are
-    // baked in and easy to undo by accident:
-    //  - Leaning harder on the prohibition ("NEVER prefix an ordinary word") made the model drop the
-    //    + altogether on one run. The positive imperative has to stay at least as strong.
-    //  - The worked example did what two rounds of rule-tightening could not. It deliberately uses a
-    //    different identifier and different context words from any test, so passing demonstrates
-    //    generalisation rather than matching a fixture.
+    // Three lessons are baked in, each easy to undo by accident:
+    //  - The ABSENT case has to lead. An earlier wording said "typically one + per query" and "do not
+    //    put + on ordinary words", and a model asked "how long do they have to decide our
+    //    registration application?" still emitted `+registration +application +decide +how +long` —
+    //    zero results, where the same words unrequired put the target at rank 1. Stating what to do
+    //    when there is nothing to require is what that wording lacked.
+    //  - Leaning harder on the prohibition alone made a model drop the + even where it belonged.
+    //    Both examples are present so neither instinct dominates.
+    //  - The worked examples did what rule-tightening could not. They use identifiers and context
+    //    words found in no test, so passing shows generalisation rather than fixture-matching.
     FullTextQueryMode.EXPRESSION -> """
         Full Lucene syntax. `+term` REQUIRES a term — a document without it cannot match; unprefixed
-        terms do not filter, they only rank. ALWAYS put + on the identifier in the question: an error
-        code, part number, ticket reference, stack-trace token, or other exact string an embedding
-        cannot represent. That is what makes the search precise — without it the ordinary words match
-        everything and bury the one document that carries the identifier. Do NOT put + on ordinary
-        words: `+payment` discards every document that words things differently, turning a precise
-        search into an empty one. Typically one + per query — the identifier required, everything
-        else bare.
-        Example: "why did order PN-4471-B fail at checkout?" -> `+PN-4471-B order fail checkout`
-        (the part number is required; "order", "fail" and "checkout" stay bare so they only rank).
+        terms do not filter, they only rank.
+        MOST QUESTIONS NEED NO + AT ALL. Use + only for an exact string an embedding cannot
+        represent: an error code, part number, ticket reference, stack-trace token. If the question
+        contains no such string, send the words plain.
+        NEVER put + on an ordinary word, and never on more than one term unless the question really
+        does contain two identifiers. Requiring several ordinary words demands they all appear in the
+        same chunk, which usually matches NOTHING and loses the answer outright — far worse than
+        ranking poorly.
+        Example: "how long do they have to decide our registration application?"
+          -> `registration application decide time limit`  (no identifier in the question, so no +)
+        Example: "why did order PN-4471-B fail at checkout?"
+          -> `+PN-4471-B order fail checkout`  (one identifier required; the rest only rank)
     """.trimIndent()
 
     // No operators are offered because none would work: under LITERAL every character is escaped.

@@ -83,8 +83,47 @@ internal object FullTextQueryPreparation {
         mode: FullTextQueryMode,
         extractor: RequiredTermExtractor,
     ): PreparedFullTextQuery = when (mode) {
-        FullTextQueryMode.EXPRESSION -> PreparedFullTextQuery(query = rawQuery, fallback = null)
+        FullTextQueryMode.EXPRESSION -> expression(rawQuery, extractor)
         FullTextQueryMode.LITERAL -> literal(rawQuery, extractor)
+    }
+
+    /**
+     * The caller's expression, unaltered — plus a relaxed form to fall back to if it matches nothing.
+     *
+     * The expression itself is never rewritten: what the caller wrote is what runs, and in the
+     * normal case nothing here changes anything. The fallback is consulted only after a query has
+     * returned zero rows.
+     *
+     * It exists because a model composing conjunctions can take retrieval to nothing, in a way no
+     * scoring change can recover from. Measured on a benchmark corpus: asked *"how long do they have
+     * to decide our registration application?"*, a model emitted
+     * `+registration +application +decide +how +long` — every term required, in a question
+     * containing no identifier at all. That matched **zero** chunks. The same words unrequired put
+     * the target document at rank 1 with 82 matching chunks. Full-text was 22 of 24 tool calls on
+     * that path, so the whole retrieval step went dark.
+     *
+     * Relaxation is selective, not wholesale: `+` is dropped from terms that are not
+     * identifier-shaped and kept on those that are. `+registration +application` relaxes completely;
+     * `+ER99999_00 +payment` keeps the code required and still returns nothing, which is the honest
+     * answer for an identifier absent from the corpus. Requiring an ordinary word is a mistake worth
+     * undoing. Requiring an identifier is the caller doing exactly what the tool description asked.
+     */
+    private fun expression(rawQuery: String, extractor: RequiredTermExtractor): PreparedFullTextQuery {
+        val requiredBare = rawQuery.split(WHITESPACE)
+            .filter { it.length > 1 && it.startsWith("+") }
+            .map { it.removePrefix("+") }
+        if (requiredBare.isEmpty()) return PreparedFullTextQuery(query = rawQuery, fallback = null)
+
+        val identifiers = extractor.requiredTerms(requiredBare.joinToString(" ")).toSet()
+        val relaxed = rawQuery.split(WHITESPACE).joinToString(" ") { token ->
+            val bare = token.removePrefix("+")
+            if (token.length > 1 && token.startsWith("+") && bare !in identifiers) bare else token
+        }
+        // Unchanged means every required term was an identifier: nothing to relax, and empty is true.
+        return PreparedFullTextQuery(
+            query = rawQuery,
+            fallback = relaxed.takeIf { it != rawQuery },
+        )
     }
 
     private fun literal(rawQuery: String, extractor: RequiredTermExtractor): PreparedFullTextQuery {

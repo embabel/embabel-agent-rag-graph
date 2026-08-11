@@ -275,4 +275,54 @@ class FullTextQueryPreparationTest {
             assertNull(prepared.fallback, "nothing required, so nothing to retreat from")
         }
     }
+
+    @Nested
+    @DisplayName("EXPRESSION recovers from a conjunction that matches nothing")
+    inner class ExpressionRelaxation {
+
+        private fun expression(query: String) = FullTextQueryPreparation.prepare(
+            query, FullTextQueryMode.EXPRESSION, CompositeRequiredTermExtractor(),
+        )
+
+        @Test
+        fun `a query requiring only ordinary words relaxes completely`() {
+            // Verbatim from a benchmark run. `+registration +application +decide +how +long` matched
+            // ZERO chunks on the real corpus; the same words unrequired put the target document at
+            // rank 1 with 82 matching chunks. Retrieval went dark on a question with no identifier
+            // in it at all.
+            val prepared = expression("+registration +application +decide +how +long")
+            assertEquals("+registration +application +decide +how +long", prepared.query,
+                "the caller's expression still runs first, unaltered")
+            assertEquals("registration application decide how long", prepared.fallback,
+                "every required term was an ordinary word, so every + is dropped")
+        }
+
+        @Test
+        fun `an identifier stays required, so an absent code still answers honestly`() {
+            // The property that stops this becoming blanket relaxation: a code that is genuinely
+            // missing from the corpus must keep returning nothing rather than junk.
+            val prepared = expression("+ER99999_00 +payment +service")
+            assertEquals("+ER99999_00 payment service", prepared.fallback,
+                "ordinary words relax; the identifier does not")
+        }
+
+        @Test
+        fun `nothing to relax means no second query`() {
+            val prepared = expression("+ER20328_23 payment service")
+            assertNull(prepared.fallback, "the only required term is an identifier — empty would be the truth")
+        }
+
+        @Test
+        fun `an expression with no required terms is untouched`() {
+            val prepared = expression("registration application decide")
+            assertEquals("registration application decide", prepared.query)
+            assertNull(prepared.fallback)
+        }
+
+        @Test
+        fun `a bare plus is not treated as a required term`() {
+            // "+" alone is punctuation the model emitted, not an operator with an operand.
+            assertNull(expression("cost + freight").fallback)
+        }
+    }
 }
