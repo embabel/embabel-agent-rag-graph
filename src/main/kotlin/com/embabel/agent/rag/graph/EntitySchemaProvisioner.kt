@@ -42,7 +42,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * reports that later mismatch as `EnsureResult.Drift`, which it logs and leaves in place — so a
  * wrong dimension survives every boot behind a warning nobody reads.
  *
- * So the question asked here is [EmbeddingService.awaitingKey] — whether there is a model yet — not
+ * So the question asked here is [EmbeddingService.awaitingProviderKey] — whether there is a model yet — not
  * whether reading the dimension happens to throw. A failure cannot be told apart from a provider
  * that is merely unreachable right now, and a placeholder that answered with a plausible number
  * would not fail at all. The property rather than a type test, because the platform's own event
@@ -116,7 +116,7 @@ class EntitySchemaProvisioner(
     fun ensureOnce() {
         if (!enabled || ensured.get()) return
         val embeddings = embeddingService()
-        if (embeddings.awaitingKey) {
+        if (embeddings.awaitingProviderKey) {
             // No model yet, so no dimension anyone can vouch for. Skipping is the recoverable
             // answer: the next search re-checks, and provisions once a real model is resolved.
             logger.debug(

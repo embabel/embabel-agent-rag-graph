@@ -156,7 +156,7 @@ class EntitySchemaProvisionerTest {
     /**
      * And through a decorator, which is the normal case rather than an exotic one: the platform's
      * event tracking already wraps the configured service, and this repo's own host wraps it again
-     * to hot-swap the model. `awaitingKey` rides through `by` delegation; a type test would not.
+     * to hot-swap the model. `awaitingProviderKey` rides through `by` delegation; a type test would not.
      */
     @Test
     fun `a wrapped placeholder provisions nothing either`() {
@@ -200,7 +200,7 @@ class EntitySchemaProvisionerTest {
 
     /** The platform's placeholder: carries the marker, and refuses to report a dimension. */
     private class PlaceholderEmbedding : EmbeddingService {
-        override val awaitingKey = true
+        override val awaitingProviderKey = true
         override val name = "setup-required-embedding"
         override val provider = "none"
         override val pricingModel: PricingModel? = null

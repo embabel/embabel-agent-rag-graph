@@ -40,10 +40,7 @@ class Neo4jRagDialect : RagDialect {
     override fun chunkFullTextSearchCypher(): String = """
         CALL db.index.fulltext.queryNodes(${'$'}fulltextIndex, ${'$'}searchText)
         YIELD node AS chunk, score
-        WITH collect({node: chunk, score: score}) AS results, max(score) AS maxScore
-        UNWIND results AS result
-        WITH result.node AS chunk,
-             result.score / maxScore AS normalizedScore
+        WITH chunk, score / (score + $bm25K) AS normalizedScore
           WHERE normalizedScore >= ${'$'}similarityThreshold
         RETURN {
                  text: chunk.text,
@@ -72,15 +69,12 @@ class Neo4jRagDialect : RagDialect {
         CALL db.index.fulltext.queryNodes(${'$'}fulltextIndex, ${'$'}searchText)
         YIELD node AS m, score
         WHERE score IS NOT NULL AND any(label IN labels(m) WHERE label IN ${'$'}labels)
-        WITH collect({node: m, score: score}) AS results, max(score) AS maxScore
-          WHERE maxScore IS NOT NULL AND maxScore > 0
-        UNWIND results AS result
-        WITH result.node AS match,
-             COALESCE(result.score / maxScore, 0.0) AS score,
-             result.node.name AS name,
-             result.node.description AS description,
-             result.node.id AS id,
-             labels(result.node) AS labels
+        WITH m AS match,
+             score / (score + $bm25K) AS score,
+             m.name AS name,
+             m.description AS description,
+             m.id AS id,
+             labels(m) AS labels
           WHERE score >= ${'$'}similarityThreshold
         RETURN {
                  name:        COALESCE(name, ''),
