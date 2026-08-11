@@ -15,6 +15,7 @@
  */
 package com.embabel.agent.rag.graph
 
+import com.embabel.agent.rag.graph.fulltext.FullTextQueryMode
 import com.embabel.agent.rag.model.NamedEntityData
 import org.springframework.boot.context.properties.ConfigurationProperties
 
@@ -35,21 +36,17 @@ class GraphRagServiceProperties {
     var entityFullTextIndex: String = "embabel_entity_fulltext_index"
 
     /**
-     * Whether full-text queries have their identifier-shaped tokens promoted to *required* terms
-     * before they reach the index — so `what causes ER20328_23` retrieves the chunk containing that
-     * code rather than everything sharing a common word with the question.
+     * How full-text queries are read — see [FullTextQueryMode].
      *
-     * On by default: full-text search exists for the retrieval a vector index cannot do, and this is
-     * what makes it precise. A required term matching nothing falls back to the original query, so
-     * recall cannot regress.
-     *
-     * Assumes Lucene-compatible query syntax, which holds for Neo4j full-text indexes and Memgraph's
-     * Tantivy-backed `text_search`. Set false for engines whose full-text syntax differs, such as
-     * RediSearch-backed FalkorDB.
+     * [FullTextQueryMode.EXPRESSION] by default: it is what this store has always done, and a
+     * capable caller does compose required terms when the tool description asks (3/3 on
+     * gpt-4.1-mini, against 0/3 with the notes that shipped before). Switch to
+     * [FullTextQueryMode.LITERAL] for callers that cannot — a small model is likelier to emit a
+     * malformed expression than a useful one, and under LITERAL it cannot emit one at all.
      */
-    var requireIdentifierTerms: Boolean = true
+    var queryMode: FullTextQueryMode = FullTextQueryMode.EXPRESSION
 
     override fun toString(): String {
-        return "${javaClass.simpleName}(chunkNodeName='$chunkNodeName', entityNodeName='$entityNodeName', name='$name', description='$description', contentElementIndex='$contentElementIndex', entityIndex='$entityIndex', contentElementFullTextIndex='$contentElementFullTextIndex', entityFullTextIndex='$entityFullTextIndex', requireIdentifierTerms=$requireIdentifierTerms)"
+        return "${javaClass.simpleName}(chunkNodeName='$chunkNodeName', entityNodeName='$entityNodeName', name='$name', description='$description', contentElementIndex='$contentElementIndex', entityIndex='$entityIndex', contentElementFullTextIndex='$contentElementFullTextIndex', entityFullTextIndex='$entityFullTextIndex', queryMode=$queryMode)"
     }
 }

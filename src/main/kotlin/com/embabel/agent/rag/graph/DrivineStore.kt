@@ -32,7 +32,9 @@ import com.embabel.agent.rag.model.NavigableDocument
 import com.embabel.agent.rag.model.Retrievable
 import com.embabel.agent.rag.graph.fulltext.FULL_TEXT_SIMILARITY_FLOOR
 import com.embabel.agent.rag.graph.mappers.DefaultContentElementRowMapper
-import com.embabel.agent.rag.graph.fulltext.searchRequiringIdentifiers
+import com.embabel.agent.rag.graph.fulltext.CompositeRequiredTermExtractor
+import com.embabel.agent.rag.graph.fulltext.searchPreparedQuery
+import com.embabel.agent.rag.graph.fulltext.syntaxNotesFor
 import com.embabel.agent.rag.graph.model.ContentElementRepositoryInfoImpl
 import com.embabel.agent.rag.service.CoreSearchOperations
 import com.embabel.agent.rag.service.EntitySearch
@@ -99,13 +101,8 @@ open class DrivineStore @JvmOverloads constructor(
     override val name get() = properties.name
 
     // Kept in step with GraphObjectManagerStore: this store is the A/B fallback, so retrieval must not
-    // behave differently — including what the LLM is told about query syntax.
-    override val luceneSyntaxNotes = """
-        Full Lucene syntax: +term (required), -term (excluded), "exact phrase", term* (prefix),
-        term~ (fuzzy). Prefer this tool over vector search for exact strings an embedding cannot
-        represent — error codes, part numbers, identifiers, stack-trace tokens. Such tokens are
-        required automatically, so you may pass the user's question as-is.
-    """.trimIndent()
+    // Derived from the mode so the two cannot drift: see syntaxNotesFor.
+    override val luceneSyntaxNotes get() = syntaxNotesFor(properties.queryMode)
 
     override fun supportsType(type: String): Boolean {
         return type == Chunk::class.java.simpleName
@@ -802,7 +799,7 @@ open class DrivineStore @JvmOverloads constructor(
             ?: throw UnsupportedOperationException(
                 "Fulltext search is not supported by the ${dialect.name} dialect"
             )
-        val results = searchRequiringIdentifiers(request.query, properties.requireIdentifierTerms) { searchText ->
+        val results = searchPreparedQuery(request.query, properties.queryMode, CompositeRequiredTermExtractor()) { searchText ->
             cypherSearch.chunkFullTextSearch(
                 purpose = "Chunk full text search",
                 query = queryTemplate,
@@ -857,7 +854,7 @@ open class DrivineStore @JvmOverloads constructor(
             ?: throw UnsupportedOperationException(
                 "Fulltext search is not supported by the ${dialect.name} dialect"
             )
-        val results = searchRequiringIdentifiers(request.query, properties.requireIdentifierTerms) { searchText ->
+        val results = searchPreparedQuery(request.query, properties.queryMode, CompositeRequiredTermExtractor()) { searchText ->
             cypherSearch.chunkFullTextSearchWithFilter(
                 purpose = "Chunk full text search with filter",
                 query = queryTemplate,
@@ -929,7 +926,7 @@ open class DrivineStore @JvmOverloads constructor(
         logger.info("{} entity vector results for query '{}'", entityResults.size, ragRequest.query)
         val entityFullTextQuery = dialect.entityFullTextSearchCypher()
         val entityFullTextResults = if (entityFullTextQuery != null) {
-            searchRequiringIdentifiers(ragRequest.query, properties.requireIdentifierTerms) { searchText ->
+            searchPreparedQuery(ragRequest.query, properties.queryMode, CompositeRequiredTermExtractor()) { searchText ->
                 cypherSearch.entityFullTextSearch(
                     purpose = "Entity full text search",
                     query = entityFullTextQuery,

@@ -16,6 +16,7 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.agent.filter.PropertyFilter
+import com.embabel.agent.rag.graph.fulltext.FullTextQueryMode
 import com.embabel.agent.rag.graph.model.ChunkNode
 import com.embabel.agent.rag.graph.test.DeterministicEmbeddingModel
 import com.embabel.agent.rag.ingestion.ChunkTransformer
@@ -110,7 +111,7 @@ class Neo4jPrecisionRetrievalTest {
     @BeforeEach
     fun setUp() {
         prefix = "prec-${UUID.randomUUID()}"
-        properties.requireIdentifierTerms = true
+        properties.queryMode = FullTextQueryMode.LITERAL
         store.provision()
 
         save(incident, "the payment service returned error code ER20328_23 during checkout settlement")
@@ -140,7 +141,7 @@ class Neo4jPrecisionRetrievalTest {
 
     @AfterEach
     fun cleanUp() {
-        properties.requireIdentifierTerms = true
+        properties.queryMode = FullTextQueryMode.LITERAL
         pm.execute(
             QuerySpecification.withStatement("MATCH (n) WHERE n.id STARTS WITH \$p DETACH DELETE n")
                 .bind(mapOf("p" to prefix)),
@@ -223,7 +224,7 @@ class Neo4jPrecisionRetrievalTest {
         fun `an identifier absent from the corpus falls back rather than returning nothing`() {
             // Deliberate trade: the fallback costs the "correct empty answer" for an unknown code,
             // and buys a guarantee that recall can never regress relative to the previous behaviour.
-            // Flip `requireIdentifierTerms` off to get the old behaviour wholesale.
+            // Switch to EXPRESSION to get the caller-composes surface instead.
             val hits = search("what causes error code ER99999_00 in the payment service")
             assertTrue(
                 hits.size > 1,
@@ -232,18 +233,18 @@ class Neo4jPrecisionRetrievalTest {
         }
 
         @Test
-        fun `disabling the flag restores the previous disjunctive behaviour`() {
+        fun `EXPRESSION mode passes the query through, so plain words stay disjunctive`() {
             // The before/after, in one assertion pair, on the same corpus and the same query.
             val query = "what causes error code ER20328_23 in the payment service"
             val withRequiredTerms = search(query)
 
-            properties.requireIdentifierTerms = false
+            properties.queryMode = FullTextQueryMode.EXPRESSION
             val withoutRequiredTerms = search(query)
 
-            assertEquals(setOf(id(incident)), withRequiredTerms, "precise with the rewrite")
+            assertEquals(setOf(id(incident)), withRequiredTerms, "precise under LITERAL")
             assertTrue(
                 withoutRequiredTerms.size > withRequiredTerms.size,
-                "without the rewrite the same question drags in the corpus: " +
+                "under EXPRESSION the same plain question drags in the corpus: " +
                     "${withoutRequiredTerms.size} chunks vs ${withRequiredTerms.size}",
             )
         }

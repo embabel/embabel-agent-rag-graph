@@ -18,7 +18,9 @@ package com.embabel.agent.rag.graph
 import com.embabel.agent.core.DataDictionary
 import com.embabel.agent.filter.PropertyFilter
 import com.embabel.agent.rag.filter.EntityFilter
-import com.embabel.agent.rag.graph.fulltext.searchRequiringIdentifiers
+import com.embabel.agent.rag.graph.fulltext.CompositeRequiredTermExtractor
+import com.embabel.agent.rag.graph.fulltext.searchPreparedQuery
+import com.embabel.agent.rag.graph.fulltext.syntaxNotesFor
 import com.embabel.agent.rag.model.NamedEntityData
 import com.embabel.agent.rag.model.RelationshipDirection
 import com.embabel.agent.rag.graph.mappers.NamedEntityDataRowMapper
@@ -188,14 +190,8 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
     }
 
     // Reaches the LLM verbatim via TextSearchTools' description. "Full support" was true and useless:
-    // it named a capability without telling the model what to type. See GraphObjectManagerStore.
-    override val luceneSyntaxNotes: String
-        get() = """
-            Full Lucene syntax: +term (required), -term (excluded), "exact phrase", term* (prefix),
-            term~ (fuzzy). Prefer this tool over vector search for exact strings an embedding cannot
-            represent — identifiers, codes, reference numbers. Such tokens are required automatically,
-            so you may pass the user's question as-is.
-        """.trimIndent()
+    // Derived from the mode so the two cannot drift: see syntaxNotesFor.
+    override val luceneSyntaxNotes get() = syntaxNotesFor(properties.queryMode)
 
     override fun createRelationship(
         a: RetrievableIdentifier,
@@ -469,7 +465,7 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
 
         // Same treatment as chunk full-text: an entity named by an identifier is exactly the lookup a
         // vector index cannot serve, so the identifier decides membership rather than the score.
-        val results = searchRequiringIdentifiers(request.query, properties.requireIdentifierTerms) { searchText ->
+        val results = searchPreparedQuery(request.query, properties.queryMode, CompositeRequiredTermExtractor()) { searchText ->
             val params = mapOf(
                 "fulltextIndex" to properties.entityFullTextIndex,
                 "searchText" to searchText,

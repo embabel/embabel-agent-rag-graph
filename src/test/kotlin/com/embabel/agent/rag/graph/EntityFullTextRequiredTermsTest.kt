@@ -16,6 +16,7 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.agent.core.DataDictionary
+import com.embabel.agent.rag.graph.fulltext.FullTextQueryMode
 import com.embabel.agent.rag.model.NamedEntityData
 import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.core.types.SimilarityResult
@@ -47,7 +48,7 @@ import org.junit.jupiter.api.Test
  */
 class EntityFullTextRequiredTermsTest {
 
-    private val properties = GraphRagServiceProperties()
+    private val properties = GraphRagServiceProperties().apply { queryMode = FullTextQueryMode.LITERAL }
 
     /** Captures every `searchText` bound to the entity full-text query, in call order. */
     private fun repositoryCapturing(
@@ -83,7 +84,9 @@ class EntityFullTextRequiredTermsTest {
 
         assertEquals(1, bound.size, "a matching required-term query needs no second search")
         assertTrue(
-            bound.single().startsWith("+\"PN-88421-C\""),
+            // Escaped, not quoted: LITERAL escapes every special character, so the hyphens arrive
+            // as `\-` and the parser reads one term rather than three.
+            bound.single().startsWith("+PN\\-88421\\-C"),
             "entity search must receive the rewritten query; got '${bound.single()}'",
         )
     }
@@ -98,8 +101,11 @@ class EntityFullTextRequiredTermsTest {
         val results = search(repo, "which account owns PN-99999-Z")
 
         assertEquals(2, bound.size, "expected a required-term attempt then a fallback; got $bound")
-        assertTrue(bound[0].startsWith("+\""), "first attempt requires the identifier")
-        assertEquals("which account owns PN-99999-Z", bound[1], "fallback runs the original query")
+        assertTrue(bound[0].startsWith("+PN\\-99999\\-Z"), "first attempt requires the identifier")
+        assertEquals(
+            "which account owns PN\\-99999\\-Z", bound[1],
+            "fallback drops the requirement but keeps the escaping — it is still LITERAL",
+        )
         assertTrue(results.isNotEmpty(), "fallback results must be returned, not discarded")
     }
 
@@ -115,9 +121,9 @@ class EntityFullTextRequiredTermsTest {
     }
 
     @Test
-    @DisplayName("disabling the flag turns the entity path back to its previous behaviour")
-    fun `flag disables the rewrite on the entity path too`() {
-        properties.requireIdentifierTerms = false
+    @DisplayName("EXPRESSION mode leaves the entity query exactly as the caller wrote it")
+    fun `EXPRESSION mode passes the entity query through untouched`() {
+        properties.queryMode = FullTextQueryMode.EXPRESSION
         val bound = mutableListOf<String>()
         val repo = repositoryCapturing(bound) { emptyList() }
 

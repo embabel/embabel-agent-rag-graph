@@ -19,7 +19,10 @@ import com.embabel.agent.filter.PropertyFilter
 import com.embabel.agent.rag.filter.EntityFilter
 import com.embabel.agent.rag.graph.dialect.RagDialect
 import com.embabel.agent.rag.graph.fulltext.FULL_TEXT_SIMILARITY_FLOOR
-import com.embabel.agent.rag.graph.fulltext.searchRequiringIdentifiers
+import com.embabel.agent.rag.graph.fulltext.CompositeRequiredTermExtractor
+import com.embabel.agent.rag.graph.fulltext.RequiredTermExtractor
+import com.embabel.agent.rag.graph.fulltext.searchPreparedQuery
+import com.embabel.agent.rag.graph.fulltext.syntaxNotesFor
 import com.embabel.agent.rag.graph.model.ChunkExpandView
 import com.embabel.agent.rag.graph.model.ChunkNode
 import com.embabel.agent.rag.graph.model.ContainerSectionNode
@@ -111,17 +114,14 @@ class GraphObjectManagerStore(
 
     override val name get() = properties.name
     override val enhancers: List<RetrievableEnhancer> = emptyList()
-    // Reaches the LLM verbatim: TextSearchTools builds its tool description from this. "Full support"
-    // was true and useless — it told a model what the engine COULD do, not what to type. The `+`
-    // guidance is what makes an identifier lookup precise, and identifier-shaped tokens are required
-    // automatically anyway (see FullTextQueryPreparation), so this documents behaviour rather than
-    // relying on the model to remember it.
-    override val luceneSyntaxNotes = """
-        Full Lucene syntax: +term (required), -term (excluded), "exact phrase", term* (prefix),
-        term~ (fuzzy). Prefer this tool over vector search for exact strings an embedding cannot
-        represent — error codes, part numbers, identifiers, stack-trace tokens. Such tokens are
-        required automatically, so you may pass the user's question as-is.
-    """.trimIndent()
+    // Derived from the mode so the two cannot drift: see syntaxNotesFor.
+    override val luceneSyntaxNotes get() = syntaxNotesFor(properties.queryMode)
+
+    /**
+     * Picks the terms LITERAL mode requires. Swap in a document-frequency or model-backed
+     * implementation where the lexical rules are too narrow — see [RequiredTermExtractor].
+     */
+    var requiredTermExtractor: RequiredTermExtractor = CompositeRequiredTermExtractor()
     override fun supportsType(type: String): Boolean = type == Chunk::class.java.simpleName
 
     init {
@@ -288,7 +288,7 @@ class GraphObjectManagerStore(
     }
 
     private fun <T> requiringIdentifiers(query: String, search: (String) -> List<T>): List<T> =
-        searchRequiringIdentifiers(query, properties.requireIdentifierTerms, search)
+        searchPreparedQuery(query, properties.queryMode, requiredTermExtractor, search)
 
     private fun runFullTextSearch(query: String, topK: Int, threshold: Double): List<SimilarityResult<out Chunk>> =
         gom.loadMatching<ChunkNode>(query, topK, threshold)
