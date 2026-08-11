@@ -28,6 +28,7 @@ import org.drivine.manager.PersistenceManager
 import org.drivine.schema.EnsureResult
 import org.drivine.schema.IndexManager
 import org.drivine.schema.SchemaItemInfo
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -144,11 +145,17 @@ class EntitySchemaProvisionerTest {
      * called, so a schema commitment is never made from a failure.
      */
     @Test
-    fun `a placeholder embedding service provisions nothing and never touches the database`() {
+    fun `a placeholder embedding service is asked, never read, and provisions nothing`() {
         val pm = mockk<PersistenceManager>(relaxed = true) { every { type } returns DatabaseType.NEO4J }
+        val placeholder = PlaceholderEmbedding()
 
-        EntitySchemaProvisioner(pm, properties, { PlaceholderEmbedding() }).ensureOnce()
+        EntitySchemaProvisioner(pm, properties, { placeholder }).ensureOnce()
 
+        assertEquals(
+            0, placeholder.dimensionReads,
+            "read a dimension from a placeholder — awaitingKey was not honoured, and only the " +
+                "exception stopped an index being built",
+        )
         verify(exactly = 0) { pm.indexes }
         verify(exactly = 0) { pm.constraints }
     }
@@ -162,8 +169,11 @@ class EntitySchemaProvisionerTest {
     fun `a wrapped placeholder provisions nothing either`() {
         val pm = mockk<PersistenceManager>(relaxed = true) { every { type } returns DatabaseType.NEO4J }
 
-        EntitySchemaProvisioner(pm, properties, { Wrapper(Wrapper(PlaceholderEmbedding())) }).ensureOnce()
+        val placeholder = PlaceholderEmbedding()
 
+        EntitySchemaProvisioner(pm, properties, { Wrapper(Wrapper(placeholder)) }).ensureOnce()
+
+        assertEquals(0, placeholder.dimensionReads, "the decorator hid awaitingKey")
         verify(exactly = 0) { pm.indexes }
         verify(exactly = 0) { pm.constraints }
     }
@@ -199,7 +209,16 @@ class EntitySchemaProvisionerTest {
     }
 
     /** The platform's placeholder: carries the marker, and refuses to report a dimension. */
+    /**
+     * Counts dimension reads, because "provisioned nothing" is too weak to prove anything: a
+     * provisioner that ignored [awaitingKey] would read the dimension, throw, be caught, and also
+     * provision nothing. The contract is that the placeholder is ASKED and never CALLED, so the
+     * discriminating assertion is that no one read a dimension we cannot vouch for.
+     */
     private class PlaceholderEmbedding : EmbeddingService {
+        var dimensionReads = 0
+            private set
+
         override val awaitingKey = true
         override val name = "setup-required-embedding"
         override val provider = "none"

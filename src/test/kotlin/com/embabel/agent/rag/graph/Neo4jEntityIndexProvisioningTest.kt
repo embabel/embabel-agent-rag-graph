@@ -17,6 +17,8 @@ package com.embabel.agent.rag.graph
 
 import com.embabel.agent.core.DataDictionary
 import com.embabel.agent.rag.graph.test.DeterministicEmbeddingModel
+import com.embabel.common.ai.model.EmbeddingService
+import com.embabel.common.ai.model.PricingModel
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import com.embabel.common.core.types.TextSimilaritySearchRequest
 import org.drivine.autoconfigure.EnableDrivine
@@ -230,6 +232,63 @@ class Neo4jEntityIndexProvisioningTest {
             properties.entityFullTextIndex !in indexNames(),
             "the search provisioned despite opting out",
         )
+    }
+
+    /**
+     * The BYOK shape as the platform actually produces it. The cold-model tests above use a service
+     * that THROWS, which was the old failure mode; a keyless deployment now resolves a placeholder
+     * that answers `awaitingKey` and refuses to report a dimension. Nothing may be provisioned from
+     * it, and — the part a throwing double cannot show — nothing may be provisioned by catching it
+     * either, since the placeholder is asked, never called.
+     */
+    @Test
+    fun `a placeholder embedding service provisions nothing, and a real one then does`() {
+        val placeholder = PlaceholderEmbeddingService()
+        var resolved: EmbeddingService = placeholder
+        val repository = DrivineNamedEntityDataRepository(
+            persistenceManager = pm,
+            properties = properties,
+            dataDictionary = DataDictionary.fromDomainTypes("test", emptyList()),
+            embeddingService = SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel()),
+            entitySchema = EntitySchemaProvisioner(pm, properties, { resolved }),
+        )
+        assertEquals(
+            0, placeholder.dimensionReads,
+            "read a dimension from a placeholder — an absent index proves nothing on its own, " +
+                "since the read would have thrown and been caught",
+        )
+        assertTrue(
+            properties.entityIndex !in indexNames(),
+            "provisioned while the deployment was still awaiting an embedding key",
+        )
+
+        resolved = SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel())
+        repository.textSearch(TextSimilaritySearchRequest("anything", 0.0, 1))
+
+        val names = indexNames()
+        assertTrue(properties.entityIndex in names, "vector index ${properties.entityIndex} in $names")
+        assertTrue(
+            properties.entityFullTextIndex in names,
+            "full-text index ${properties.entityFullTextIndex} in $names",
+        )
+    }
+
+    /** What `embabel.models.default-embedding-model=setup-required-embedding` resolves to. */
+    private class PlaceholderEmbeddingService : EmbeddingService {
+        var dimensionReads = 0
+            private set
+
+        override val name = "setup-required-embedding"
+        override val provider = "none"
+        override val pricingModel: PricingModel? = null
+        override val awaitingKey = true
+        override fun embed(text: String): FloatArray = error("no embedding service configured")
+        override fun embed(texts: List<String>): List<FloatArray> = error("no embedding service configured")
+        override val dimensions: Int
+            get() {
+                dimensionReads++
+                error("no embedding service configured")
+            }
     }
 
     private fun newRepository(
