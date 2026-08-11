@@ -18,6 +18,9 @@ package com.embabel.agent.rag.graph
 import com.embabel.agent.core.DataDictionary
 import com.embabel.agent.filter.PropertyFilter
 import com.embabel.agent.rag.filter.EntityFilter
+import com.embabel.agent.rag.graph.fulltext.CompositeRequiredTermExtractor
+import com.embabel.agent.rag.graph.fulltext.searchPreparedQuery
+import com.embabel.agent.rag.graph.fulltext.syntaxNotesFor
 import com.embabel.agent.rag.model.NamedEntityData
 import com.embabel.agent.rag.model.RelationshipDirection
 import com.embabel.agent.rag.graph.mappers.NamedEntityDataRowMapper
@@ -186,8 +189,9 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         }
     }
 
-    override val luceneSyntaxNotes: String
-        get() = "Full support"
+    // Reaches the LLM verbatim via TextSearchTools' description. "Full support" was true and useless:
+    // Derived from the mode so the two cannot drift: see syntaxNotesFor.
+    override val luceneSyntaxNotes get() = syntaxNotesFor(properties.queryMode)
 
     override fun createRelationship(
         a: RetrievableIdentifier,
@@ -459,20 +463,24 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
         val combinedFilterResult = combineFilters(metadataFilter, entityFilter)
         val statement = injectFilterIntoQuery(baseStatement, combinedFilterResult, "n")
 
-        val params = mapOf(
-            "fulltextIndex" to properties.entityFullTextIndex,
-            "searchText" to request.query,
-            "similarityThreshold" to request.similarityThreshold,
-            "topK" to request.topK,
-            "entityNodeName" to properties.entityNodeName,
-        ) + combinedFilterResult.parameters
+        // Same treatment as chunk full-text: an entity named by an identifier is exactly the lookup a
+        // vector index cannot serve, so the identifier decides membership rather than the score.
+        val results = searchPreparedQuery(request.query, properties.queryMode, CompositeRequiredTermExtractor()) { searchText ->
+            val params = mapOf(
+                "fulltextIndex" to properties.entityFullTextIndex,
+                "searchText" to searchText,
+                "similarityThreshold" to request.similarityThreshold,
+                "topK" to request.topK,
+                "entityNodeName" to properties.entityNodeName,
+            ) + combinedFilterResult.parameters
 
-        val results = persistenceManager.query(
-            QuerySpecification
-                .withStatement(statement)
-                .bind(params)
-                .mapWith(namedEntityDataSimilarityMapper)
-        )
+            persistenceManager.query(
+                QuerySpecification
+                    .withStatement(statement)
+                    .bind(params)
+                    .mapWith(namedEntityDataSimilarityMapper)
+            )
+        }
         logger.info("{} text search results for query '{}'", results.size, request.query)
         return results
     }

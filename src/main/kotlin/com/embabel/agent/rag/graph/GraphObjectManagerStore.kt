@@ -18,6 +18,11 @@ package com.embabel.agent.rag.graph
 import com.embabel.agent.filter.PropertyFilter
 import com.embabel.agent.rag.filter.EntityFilter
 import com.embabel.agent.rag.graph.dialect.RagDialect
+import com.embabel.agent.rag.graph.fulltext.FULL_TEXT_SIMILARITY_FLOOR
+import com.embabel.agent.rag.graph.fulltext.CompositeRequiredTermExtractor
+import com.embabel.agent.rag.graph.fulltext.RequiredTermExtractor
+import com.embabel.agent.rag.graph.fulltext.searchPreparedQuery
+import com.embabel.agent.rag.graph.fulltext.syntaxNotesFor
 import com.embabel.agent.rag.graph.model.ChunkExpandView
 import com.embabel.agent.rag.graph.model.ChunkNode
 import com.embabel.agent.rag.graph.model.ContainerSectionNode
@@ -78,6 +83,7 @@ private const val REEMBED_BATCH_SIZE = 256
  */
 private const val FULL_TEXT_SUPPRESSION_WARNING_THRESHOLD: Double = 0.5
 
+
 /**
  * A [Chunk]-focused RAG store backed by Drivine's [GraphObjectManager] and the `@NodeFragment` models
  * ([ChunkNode] / [LeafSectionNode] / [ContainerSectionNode] / [DocumentNode]).
@@ -108,7 +114,14 @@ class GraphObjectManagerStore(
 
     override val name get() = properties.name
     override val enhancers: List<RetrievableEnhancer> = emptyList()
-    override val luceneSyntaxNotes = "Full support"
+    // Derived from the mode so the two cannot drift: see syntaxNotesFor.
+    override val luceneSyntaxNotes get() = syntaxNotesFor(properties.queryMode)
+
+    /**
+     * Picks the terms LITERAL mode requires. Swap in a document-frequency or model-backed
+     * implementation where the lexical rules are too narrow — see [RequiredTermExtractor].
+     */
+    var requiredTermExtractor: RequiredTermExtractor = CompositeRequiredTermExtractor()
     override fun supportsType(type: String): Boolean = type == Chunk::class.java.simpleName
 
     init {
@@ -234,12 +247,14 @@ class GraphObjectManagerStore(
         }
         // A blank query would reach Lucene and throw a ParseException — empty-in, empty-out (see chunkFullTextSearch).
         if (request.query.isBlank()) return emptyList()
-        return gom.loadMatching(
-            ChunkNode::class.java, ChunkNodeQueryDsl.INSTANCE,
-            request.query, request.topK, request.similarityThreshold,
-        ) {
-            where { query.applyFilters(metadataFilter, entityFilter) }
-        }.map { SimilarityResult.create(it.value.toCoreType(), it.score) }.asResultsOf()
+        return requiringIdentifiers(request.query) { searchText ->
+            gom.loadMatching(
+                ChunkNode::class.java, ChunkNodeQueryDsl.INSTANCE,
+                searchText, request.topK, request.similarityThreshold,
+            ) {
+                where { query.applyFilters(metadataFilter, entityFilter) }
+            }.map { SimilarityResult.create(it.value.toCoreType(), it.score) }
+        }.asResultsOf()
     }
 
     /**
@@ -264,10 +279,19 @@ class GraphObjectManagerStore(
      * returns no results rather than reaching Lucene — an empty query string is ordinary input (an LLM
      * driving the tool surface can emit one), and the full-text parser would otherwise throw a
      * `ParseException`. Empty (not match-all) is the correct answer.
+     *
+     * Identifier-shaped tokens are promoted to required terms first — see [requiringIdentifiers].
      */
-    private fun chunkFullTextSearch(query: String, topK: Int, threshold: Double): List<SimilarityResult<out Chunk>> =
-        if (query.isBlank()) emptyList()
-        else gom.loadMatching<ChunkNode>(query, topK, threshold)
+    private fun chunkFullTextSearch(query: String, topK: Int, threshold: Double): List<SimilarityResult<out Chunk>> {
+        if (query.isBlank()) return emptyList()
+        return requiringIdentifiers(query) { runFullTextSearch(it, topK, threshold) }
+    }
+
+    private fun <T> requiringIdentifiers(query: String, search: (String) -> List<T>): List<T> =
+        searchPreparedQuery(query, properties.queryMode, requiredTermExtractor, search)
+
+    private fun runFullTextSearch(query: String, topK: Int, threshold: Double): List<SimilarityResult<out Chunk>> =
+        gom.loadMatching<ChunkNode>(query, topK, threshold)
             .map { SimilarityResult.create(it.value.toCoreType(), it.score) }
             .also { warnIfThresholdSuppressedResults(query, threshold, it.size) }
 
@@ -311,7 +335,9 @@ class GraphObjectManagerStore(
         if (ragRequest.contentElementSearch.types.contains(Chunk::class.java)) {
             results += runCatching {
                 chunkVectorSearch(ragRequest.query, ragRequest.topK, ragRequest.similarityThreshold) +
-                    chunkFullTextSearch(ragRequest.query, ragRequest.topK, ragRequest.similarityThreshold)
+                    // Vector keeps the caller's threshold; full-text cannot use it. See
+                    // FULL_TEXT_SIMILARITY_FLOOR for the measurements behind the asymmetry.
+                    chunkFullTextSearch(ragRequest.query, ragRequest.topK, FULL_TEXT_SIMILARITY_FLOOR)
             }.getOrElse { e ->
                 logger.error("Error during gom-store facet search for '{}'", ragRequest.query, e)
                 emptyList()
