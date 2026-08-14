@@ -135,6 +135,7 @@ class GraphObjectManagerStore(
                 "chunkNodeName='${properties.chunkNodeName}'. The @NodeFragment label is not configurable; " +
                 "a mismatch yields silent empty results."
         }
+        properties.validate()
     }
 
     /**
@@ -225,7 +226,17 @@ class GraphObjectManagerStore(
         return chunkFullTextSearch(request.query, request.topK, request.similarityThreshold).asResultsOf()
     }
 
-    /** Metadata-filtered vector search: `loadNearest` plus the [applyFilter] `where { }`. */
+    /**
+     * Metadata-filtered vector search: `loadNearest` plus the [applyFilter] `where { }`.
+     *
+     * Over-fetches the index beam, because this is the path where `topK` does not mean what the caller
+     * thinks. The predicates apply *after* the index yields, so asking for exactly `topK` returns
+     * roughly `topK × selectivity` rows drawn from the globally-nearest rather than the nearest in
+     * scope. `searchK` widens the beam and moves the trim after the filter; Drivine then re-ranks the
+     * survivors by exact similarity, which is what makes the wider beam correct and not merely wider.
+     * The multiplier is [GraphRagServiceProperties.filteredSearchOverFetch] — policy belongs here,
+     * where the selectivity is knowable, rather than in Drivine.
+     */
     override fun <T : Retrievable> vectorSearchWithFilter(
         request: TextSimilaritySearchRequest,
         clazz: Class<T>,
@@ -239,6 +250,7 @@ class GraphObjectManagerStore(
         return gom.loadNearest(
             ChunkNode::class.java, ChunkNodeQueryDsl.INSTANCE,
             vector, request.topK, request.similarityThreshold,
+            searchK = properties.filteredSearchK(request.topK),
         ) {
             where { query.applyFilters(metadataFilter, entityFilter) }
         }.map { SimilarityResult.create(it.value.toCoreType(), it.score) }.asResultsOf()
