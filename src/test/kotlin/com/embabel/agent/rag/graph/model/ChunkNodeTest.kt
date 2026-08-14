@@ -38,6 +38,7 @@ class ChunkNodeTest {
                 "container_section_id" to "sec-1",
                 "sequence_number" to 3,
                 "root_document_id" to "doc-1",
+                "root_document_title" to "Acme 10-K",
                 "source" to "wiki",          // free-form
                 "url" to "http://x",         // free-form (also Chunk.uri)
             ),
@@ -50,6 +51,7 @@ class ChunkNodeTest {
         assertEquals("sec-1", node.containerSectionId)
         assertEquals(3L, node.sequenceNumber)          // Int coerced to Long
         assertEquals("doc-1", node.rootDocumentId)
+        assertEquals("Acme 10-K", node.rootDocumentTitle)
         // ...and are NOT duplicated into the bag
         assertTrue("container_section_id" !in node.freeFormMetadata)
         assertTrue("sequence_number" !in node.freeFormMetadata)
@@ -91,6 +93,7 @@ class ChunkNodeTest {
     fun `maps every ChunkStructure field through the node and back`() {
         val structure = ChunkStructure(
             rootDocumentId = "doc-1",
+            rootDocumentTitle = "Acme 10-K",
             containerSectionId = "container-1",
             containerSectionTitle = "Container",
             containerSectionUrl = "http://example.com/container",
@@ -105,6 +108,23 @@ class ChunkNodeTest {
 
         // Nothing is dropped: every field a chunker can set has a home on the node.
         assertEquals(structure, ChunkNode.from(chunk).toCoreType().structure)
+    }
+
+    @Test
+    fun `reads root document title bagged by pre-promotion writes`() {
+        // Rows written before root_document_title was promoted have it under the metadata. prefix.
+        // Without this fallback, adding the key to ChunkStructure.KEYS would make an existing
+        // value vanish: toCoreType passes an explicit structure, so core never reads it back out
+        // of the bag, while withoutStructuralKeys now strips it from the bag.
+        val node = ChunkNode(
+            id = "c",
+            text = "body",
+            urtext = "body",
+            parentId = "p",
+            freeFormMetadata = mapOf("root_document_title" to "Acme 10-K"),
+        )
+
+        assertEquals("Acme 10-K", node.toCoreType().structure.rootDocumentTitle)
     }
 
     @Test

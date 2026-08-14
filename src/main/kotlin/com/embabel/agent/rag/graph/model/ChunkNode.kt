@@ -54,6 +54,7 @@ data class ChunkNode(
     val parentId: String,
     override val uri: String? = null,
     @GraphProperty("root_document_id") val rootDocumentId: String? = null,
+    @GraphProperty("root_document_title") val rootDocumentTitle: String? = null,
     @GraphProperty("container_section_id") val containerSectionId: String? = null,
     @GraphProperty("container_section_title") val containerSectionTitle: String? = null,
     @GraphProperty("container_section_url") val containerSectionUrl: String? = null,
@@ -80,6 +81,9 @@ data class ChunkNode(
         urtext = urtext,
         structure = ChunkStructure(
             rootDocumentId = rootDocumentId,
+            // Pre-promotion rows bagged this one under `metadata.root_document_title`.
+            rootDocumentTitle = rootDocumentTitle
+                ?: freeFormMetadata[ChunkStructure.ROOT_DOCUMENT_TITLE] as? String,
             containerSectionId = containerSectionId,
             containerSectionTitle = containerSectionTitle,
             // Pre-promotion rows bagged this one under `metadata.container_section_url`.
@@ -105,6 +109,7 @@ data class ChunkNode(
                 parentId = chunk.parentId,
                 uri = chunk.uri,
                 rootDocumentId = structure.rootDocumentId,
+                rootDocumentTitle = structure.rootDocumentTitle,
                 containerSectionId = structure.containerSectionId,
                 containerSectionTitle = structure.containerSectionTitle,
                 containerSectionUrl = structure.containerSectionUrl,
