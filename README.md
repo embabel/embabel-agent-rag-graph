@@ -92,7 +92,33 @@ embabel:
         entity-index: embabel_entity_index
         content-element-full-text-index: embabel_content_fulltext_index
         entity-full-text-index: embabel_entity_fulltext_index
+        filtered-search-over-fetch: 5      # beam multiplier for filtered vector search
+        max-filtered-search-k: 500         # ceiling on the widened beam
 ```
+
+### Filtered vector search and `k`
+
+`k` handed to a vector index is the HNSW **search beam width**, not merely a row count, and `where {}`
+predicates apply *after* the index yields. A metadata-filtered caller therefore receives roughly
+`k × selectivity` rows, drawn from the globally-nearest rather than the nearest in scope. Measured on a
+9k-vector, 1536-dim cosine index: a caller asking for 40 got back 25, holding only 25 of the true scoped
+top 40 — recall 0.625.
+
+`filtered-search-over-fetch` widens what the index is asked for while still returning `topK` rows, with
+the trim applied after the filter. At the default of 5 the same query returns 40/40 at recall 1.0.
+
+- Only the **filtered** path over-fetches. Unfiltered search already returns `topK` of `topK`.
+- Set it to `1` to disable over-fetch entirely, which emits exactly what earlier versions did.
+- Raise it for highly selective filters; the right value is data-dependent.
+- `max-filtered-search-k` bounds the cost, since the widened beam is re-ranked by exact similarity and
+  that reads the full embedding off every candidate. A `topK` at or above the ceiling does not
+  over-fetch rather than having its beam narrowed.
+
+The exact re-rank is Neo4j-only; FalkorDB and Memgraph over-fetch and trim by their own approximate
+score, so they gain row count but not ordering.
+
+`Neo4jVectorRecallSearchKTest` measures all of the above against exhaustive `vector.similarity.cosine`
+ground truth, and is the place to re-measure if the corpus or index configuration changes.
 
 ### FalkorDB Notes
 
