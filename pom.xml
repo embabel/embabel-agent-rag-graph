@@ -14,10 +14,12 @@
     <version>0.4.0-SNAPSHOT</version>
     <packaging>jar</packaging>
     <name>Embabel RAG Graph</name>
-    <description>Graph database RAG implementation using Drivine for Embabel Agent. Supports Neo4j, FalkorDB, Memgraph, and Neptune Analytics via a dialect abstraction.</description>
+    <description>Graph database RAG implementation using Drivine for Embabel Agent. Supports Neo4j, FalkorDB, Memgraph,
+        and Neptune Analytics via a dialect abstraction.
+    </description>
 
     <properties>
-        <embabel-agent.version>1.5.0-SNAPSHOT</embabel-agent.version>
+        <embabel-agent.version>1.5.1-SNAPSHOT</embabel-agent.version>
         <drivine.version>0.0.79</drivine.version>
         <!-- Overrides the parent's default: the Drivine KSP-generated DSL uses context parameters
              (Kotlin 2.2+), so this module and its codegen-gradle build compile with 2.3.21. -->
