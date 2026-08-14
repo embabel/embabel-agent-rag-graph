@@ -30,9 +30,11 @@ import org.drivine.manager.GraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 /**
  * The filtered vector path over-fetches; the unfiltered one does not.
@@ -78,6 +80,23 @@ class FilteredSearchOverFetchTest {
                 "at the cap there is no room to widen, so the search stays untuned",
             )
             assertNull(properties.filteredSearchK(properties.maxFilteredSearchK + 100))
+        }
+
+        @Test
+        fun `a multiplier below one is refused rather than silently treated as off`() {
+            // 0 would compute a beam of 0, fall through the "not wider than topK" check, and revert
+            // filtered search to the 0.625-recall path with nothing logged. The README documents 1 as
+            // the off switch, so anything below it is a typo, not a configuration.
+            properties.filteredSearchOverFetch = 0
+            val e = assertThrows<IllegalArgumentException> { properties.validate() }
+            assertTrue(
+                e.message!!.contains("filtered-search-over-fetch"),
+                "the message must name the property to fix: ${e.message}",
+            )
+
+            properties.filteredSearchOverFetch = 5
+            properties.maxFilteredSearchK = 0
+            assertThrows<IllegalArgumentException> { properties.validate() }
         }
 
         @Test

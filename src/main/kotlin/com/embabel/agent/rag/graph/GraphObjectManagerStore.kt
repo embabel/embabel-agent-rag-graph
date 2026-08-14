@@ -135,6 +135,7 @@ class GraphObjectManagerStore(
                 "chunkNodeName='${properties.chunkNodeName}'. The @NodeFragment label is not configurable; " +
                 "a mismatch yields silent empty results."
         }
+        properties.validate()
     }
 
     /**

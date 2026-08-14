@@ -27,6 +27,9 @@ import org.drivine.manager.PersistenceManagerFactory
 import org.drivine.query.QuerySpecification
 import org.drivine.query.dsl.query
 import org.drivine.query.transform
+import org.drivine.schema.Neo4jVectorOptions
+import org.drivine.schema.SimilarityFunction
+import org.drivine.schema.VectorIndexSpec
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -126,15 +129,23 @@ class Neo4jVectorRecallSearchKTest {
     @BeforeAll
     fun seedCorpus() {
         pm.execute(QuerySpecification.withStatement("MATCH (n:$LABEL) DETACH DELETE n"))
-        pm.execute(
-            QuerySpecification.withStatement(
-                """
-                CREATE VECTOR INDEX $INDEX IF NOT EXISTS FOR (n:$LABEL) ON (n.embedding)
-                OPTIONS { indexConfig: {
-                    `vector.dimensions`: $DIMS,
-                    `vector.similarity_function`: 'cosine'
-                } }
-                """.trimIndent(),
+
+        // Quantization is pinned, not inherited. It is the single setting most likely to move under a
+        // Neo4j upgrade, and it is the one this measurement is most sensitive to: it is exactly why the
+        // index's yielded score is approximate, and therefore why trimming a widened beam by that score
+        // loses true matches the beam already found. An unpinned default would let a patch bump silently
+        // change what the numbers below mean.
+        //
+        // Pinned ON, matching the current server default, so the harness keeps measuring the
+        // configuration production actually runs rather than a more favourable one.
+        //
+        // Going through VectorIndexSpec rather than hand-written DDL also derives the index name via
+        // defaultName(), which is the same derivation `partitionLabel` uses on the read — so the two
+        // cannot drift apart.
+        pm.indexes.ensure(
+            VectorIndexSpec(
+                LABEL, "embedding", DIMS, SimilarityFunction.COSINE,
+                engineOptions = listOf(Neo4jVectorOptions(quantizationEnabled = true)),
             ),
         )
 
@@ -148,23 +159,26 @@ class Neo4jVectorRecallSearchKTest {
         // ChunkNode-shaped, so the rows are readable through `gom`. Only id/text/urtext/parentId are
         // non-null on the fragment; `tenant` goes to the `metadata.` @PropertyBag, which is where
         // production's scoping keys (`source`, …) live too.
-        val rows = (0 until CORPUS).map { i ->
-            val v = if (i < CLUSTERED) {
-                unit(centre.map { it + rng.nextDouble(-0.02, 0.02) })
-            } else {
-                unit(List(DIMS) { rng.nextDouble(-1.0, 1.0) })
+        //
+        // Generated per batch, not up front. 9,000 x 1536 boxed Floats held at once is ~14M objects and
+        // a few hundred MB live, on a JVM whose heap defaults to a fraction of the host's RAM and which
+        // is already sharing the box with a Neo4j container. Per batch, peak stays around 18 MB.
+        (0 until CORPUS).chunked(500).forEach { ids ->
+            val batch = ids.map { i ->
+                val v = if (i < CLUSTERED) {
+                    unit(centre.map { it + rng.nextDouble(-0.02, 0.02) })
+                } else {
+                    unit(List(DIMS) { rng.nextDouble(-1.0, 1.0) })
+                }
+                mapOf(
+                    "id" to "probe-$i",
+                    "text" to "probe chunk $i",
+                    "urtext" to "probe chunk $i",
+                    "parentId" to "probe-parent",
+                    "embedding" to v,
+                    "tenant" to if (i % 2 == 0) TENANT else "b",
+                )
             }
-            mapOf(
-                "id" to "probe-$i",
-                "text" to "probe chunk $i",
-                "urtext" to "probe chunk $i",
-                "parentId" to "probe-parent",
-                "embedding" to v,
-                "tenant" to if (i % 2 == 0) TENANT else "b",
-            )
-        }
-
-        rows.chunked(500).forEach { batch ->
             pm.execute(
                 QuerySpecification.withStatement(
                     """

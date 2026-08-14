@@ -80,13 +80,37 @@ class GraphRagServiceProperties {
      * The beam width to ask the index for when serving a filtered search for [topK] rows, or `null`
      * to leave the search untuned — which keeps the emitted Cypher byte-identical to the unfiltered
      * shape, rather than differently shaped.
+     *
+     * Returns `null` rather than a value at or below [topK] for the same reason: Drivine rejects a
+     * `searchK` below `topK` outright, and one exactly equal to it would buy nothing while still
+     * changing the emitted query.
+     *
+     * Values below 1 are rejected at startup by [validate], not silently treated as "off" — a typo'd
+     * `0` would otherwise revert filtered search to the diluted path with nothing said.
      */
     fun filteredSearchK(topK: Int): Int? {
-        if (filteredSearchOverFetch <= 1) return null
+        if (filteredSearchOverFetch == 1) return null
         val widened = topK.toLong() * filteredSearchOverFetch
         val capped = widened.coerceAtMost(maxFilteredSearchK.toLong()).toInt()
-        // Never below topK: Drivine rejects that outright, and it could only lose results.
-        return capped.coerceAtLeast(topK).takeIf { it > topK }
+        return capped.takeIf { it > topK }
+    }
+
+    /**
+     * Fail fast on a nonsensical over-fetch configuration, at startup rather than at query time.
+     *
+     * Both of these degrade retrieval silently if wrong: a multiplier below 1 turns off the widening
+     * that a filtered search depends on, and a ceiling below 1 caps every beam out of existence. The
+     * symptom either way is fewer, worse results — not an error — so it is worth refusing to boot.
+     */
+    fun validate() {
+        require(filteredSearchOverFetch >= 1) {
+            "embabel.agent.rag.graph.filtered-search-over-fetch must be >= 1 (1 disables over-fetch), " +
+                "but was $filteredSearchOverFetch. Below 1 would silently restore the diluted " +
+                "filtered-search path."
+        }
+        require(maxFilteredSearchK >= 1) {
+            "embabel.agent.rag.graph.max-filtered-search-k must be >= 1, but was $maxFilteredSearchK."
+        }
     }
 
     override fun toString(): String {

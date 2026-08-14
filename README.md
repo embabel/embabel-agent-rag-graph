@@ -109,6 +109,8 @@ the trim applied after the filter. At the default of 5 the same query returns 40
 
 - Only the **filtered** path over-fetches. Unfiltered search already returns `topK` of `topK`.
 - Set it to `1` to disable over-fetch entirely, which emits exactly what earlier versions did.
+  Values below `1` are refused at startup rather than treated as off — a typo'd `0` would otherwise
+  restore the diluted path silently.
 - Raise it for highly selective filters; the right value is data-dependent.
 - `max-filtered-search-k` bounds the cost, since the widened beam is re-ranked by exact similarity and
   that reads the full embedding off every candidate. A `topK` at or above the ceiling does not
