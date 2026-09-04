@@ -44,8 +44,11 @@ class EntitySchemaProvisionerTest {
     private val embeddingService =
         SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel())
 
-    private fun persistenceManager(type: DatabaseType): PersistenceManager =
-        mockk<PersistenceManager>(relaxed = true) { every { this@mockk.type } returns type }
+    private fun persistenceManager(type: DatabaseType, schemaCapable: Boolean = true): PersistenceManager =
+        mockk<PersistenceManager>(relaxed = true) {
+            every { this@mockk.type } returns type
+            every { supportsSchemaManagement } returns schemaCapable
+        }
 
     /**
      * A never, not a not-yet. An engine with no schema management can never satisfy an ensure, so
@@ -56,7 +59,9 @@ class EntitySchemaProvisionerTest {
     fun `an engine with no schema management is refused at construction`() {
         listOf(DatabaseType.NEPTUNE, DatabaseType.POSTGRES).forEach { type ->
             val e = assertThrows(DrivineException::class.java) {
-                EntitySchemaProvisioner(persistenceManager(type), properties, { embeddingService })
+                EntitySchemaProvisioner(
+                    persistenceManager(type, schemaCapable = false), properties, { embeddingService },
+                )
             }
             assertTrue(type.value in e.message!!, "message names the engine: ${e.message}")
             assertTrue(
@@ -66,9 +71,19 @@ class EntitySchemaProvisionerTest {
         }
     }
 
+    /**
+     * Capability, not identity: EMBABEL is in this list precisely because this class has never
+     * heard of it. An allowlist of known-good engines refused it while its grammar created every
+     * index asked of it — the failure mode a capability question does not have.
+     */
     @Test
-    fun `schema-capable engines are accepted`() {
-        listOf(DatabaseType.NEO4J, DatabaseType.MEMGRAPH, DatabaseType.FALKORDB).forEach { type ->
+    fun `any manager that can manage schema is accepted, including engines this class does not know`() {
+        listOf(
+            DatabaseType.NEO4J,
+            DatabaseType.MEMGRAPH,
+            DatabaseType.FALKORDB,
+            DatabaseType.EMBABEL,
+        ).forEach { type ->
             assertDoesNotThrow {
                 EntitySchemaProvisioner(persistenceManager(type), properties, { embeddingService })
             }
@@ -106,6 +121,7 @@ class EntitySchemaProvisionerTest {
         }
         val pm = mockk<PersistenceManager>(relaxed = true) {
             every { type } returns DatabaseType.NEO4J
+            every { supportsSchemaManagement } returns true
             every { indexes } returns indexManager
         }
 
@@ -128,6 +144,7 @@ class EntitySchemaProvisionerTest {
         }
         val pm = mockk<PersistenceManager>(relaxed = true) {
             every { type } returns DatabaseType.NEO4J
+            every { supportsSchemaManagement } returns true
             every { indexes } returns indexManager
         }
 
@@ -145,7 +162,10 @@ class EntitySchemaProvisionerTest {
      */
     @Test
     fun `a placeholder embedding service provisions nothing and never touches the database`() {
-        val pm = mockk<PersistenceManager>(relaxed = true) { every { type } returns DatabaseType.NEO4J }
+        val pm = mockk<PersistenceManager>(relaxed = true) {
+            every { type } returns DatabaseType.NEO4J
+            every { supportsSchemaManagement } returns true
+        }
 
         EntitySchemaProvisioner(pm, properties, { PlaceholderEmbedding() }).ensureOnce()
 
@@ -160,7 +180,10 @@ class EntitySchemaProvisionerTest {
      */
     @Test
     fun `a wrapped placeholder provisions nothing either`() {
-        val pm = mockk<PersistenceManager>(relaxed = true) { every { type } returns DatabaseType.NEO4J }
+        val pm = mockk<PersistenceManager>(relaxed = true) {
+            every { type } returns DatabaseType.NEO4J
+            every { supportsSchemaManagement } returns true
+        }
 
         EntitySchemaProvisioner(pm, properties, { Wrapper(Wrapper(PlaceholderEmbedding())) }).ensureOnce()
 
@@ -182,6 +205,7 @@ class EntitySchemaProvisionerTest {
         }
         val pm = mockk<PersistenceManager>(relaxed = true) {
             every { type } returns DatabaseType.NEO4J
+            every { supportsSchemaManagement } returns true
             every { indexes } returns indexManager
         }
         // What the platform resolves changes over time; the provisioner re-asks rather than holding

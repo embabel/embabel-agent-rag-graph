@@ -17,7 +17,6 @@ package com.embabel.agent.rag.graph
 
 import com.embabel.common.ai.model.EmbeddingService
 import org.drivine.DrivineException
-import org.drivine.connection.DatabaseType
 import org.drivine.manager.PersistenceManager
 import org.drivine.schema.FullTextIndexSpec
 import org.drivine.schema.SimilarityFunction
@@ -67,7 +66,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * An engine with no schema management at all (Neptune, Postgres — Drivine's
  * `UnsupportedSchemaGrammar` throws on every call, deliberately) can never succeed, so it is refused
- * at construction rather than retried on every search forever.
+ * at construction rather than retried on every search forever. That is asked of the manager
+ * (`supportsSchemaManagement`), not inferred from the engine's name: capability belongs to the
+ * grammar, and an engine this class has never heard of may resolve a perfectly capable one.
  *
  * ## Still open: a model that CHANGES
  *
@@ -93,13 +94,12 @@ class EntitySchemaProvisioner(
     private val ensured = AtomicBoolean(false)
 
     init {
-        if (enabled && persistenceManager.type !in SCHEMA_CAPABLE) {
+        if (enabled && !persistenceManager.supportsSchemaManagement) {
             throw DrivineException(
                 "${persistenceManager.type} has no schema management, so the entity indexes " +
                     "'${properties.entityIndex}' and '${properties.entityFullTextIndex}' that entity " +
-                    "search binds by name cannot be created. Supported engines: " +
-                    SCHEMA_CAPABLE.joinToString { it.value } +
-                    ". Pass verifyIndexes = false if you provision the entity schema yourself."
+                    "search binds by name cannot be created. " +
+                    "Pass verifyIndexes = false if you provision the entity schema yourself."
             )
         }
     }
@@ -151,8 +151,4 @@ class EntitySchemaProvisioner(
         }
     }
 
-    companion object {
-        /** Engines whose grammar can create the indexes entity search binds by name. */
-        private val SCHEMA_CAPABLE = setOf(DatabaseType.NEO4J, DatabaseType.MEMGRAPH, DatabaseType.FALKORDB)
-    }
 }
