@@ -64,14 +64,10 @@ fun ChunkNodeQueryDsl.applyFilter(filter: PropertyFilter) {
         is PropertyFilter.Or -> anyOf { filter.filters.forEach { applyFilter(it) } }
         is PropertyFilter.Not -> not { applyFilter(filter.filter) }
         is EntityFilter.HasAnyLabel -> hasAnyLabel(*filter.labels.toTypedArray())
-        // List-membership (`value IN n.key`, e.g. filter chunks by a `tags` value). Drivine has the typed
-        // `hasItem` infix, but the *dynamic-key* path (predicateOn) has no list-membership operator yet —
-        // so this is the one PropertyFilter we can't translate. TODO: predicateOn(key, HAS_ELEMENT, value)
-        // once Drivine adds a dynamic list-membership operator.
-        is PropertyFilter.HasElement -> throw UnsupportedOperationException(
-            "PropertyFilter.HasElement (list-membership) is not yet translatable — pending a dynamic " +
-                "list-membership operator in Drivine's predicateOn",
-        )
+        // List-membership, `$value IN n.key` — the operands reversed vs `In`, because here the PROPERTY
+        // holds the list (a chunk's `visibleTo` share list, a `tags` array) and the filter supplies one
+        // element. HAS_ELEMENT is the dynamic-key twin of the typed `hasItem` infix.
+        is PropertyFilter.HasElement -> predicateOn(filter.key, ComparisonOperator.HAS_ELEMENT, filter.value)
         else -> throw UnsupportedOperationException(
             "GraphObjectManagerStore cannot translate ${filter::class.simpleName} to a graph query filter",
         )
