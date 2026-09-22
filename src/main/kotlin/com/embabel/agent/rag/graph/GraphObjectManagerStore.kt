@@ -151,11 +151,27 @@ class GraphObjectManagerStore(
     // absent embedding service should fail at the point of use instead. The dimension is only
     // meaningful when an index is actually provisioned or searched, which is when this now
     // resolves.
-    private val chunkVectorIndex by lazy {
-        VectorIndexSpec(
+    /**
+     * Recomputed on every read, NEVER cached.
+     *
+     * `by lazy` here was a bug with a long fuse. The spec was built once, at the first
+     * provisioning — when the deployment's model was whatever it booted with — and then reused
+     * for the life of the process. [reembedAll] drops the index by identity (which ignores width,
+     * so that part worked), rewrites every chunk at the new model's width, and calls [provision]
+     * to remake the index — from the cached spec, at the OLD width.
+     *
+     * The result was chunks holding 3072-wide vectors under an index declaring 1536, with nothing
+     * reporting it: observed on a live appliance changing text-embedding-3-small to
+     * text-embedding-3-large. `DrivineStore` states its specs with a `get()` for exactly this
+     * reason; this store was the one still caching.
+     *
+     * The cost of not caching is one object per access. The cost of caching it was an index that
+     * cannot describe what is stored.
+     */
+    private val chunkVectorIndex: VectorIndexSpec
+        get() = VectorIndexSpec(
             properties.chunkNodeName, "embedding", embeddingService.dimensions, SimilarityFunction.COSINE,
         )
-    }
     private val chunkFullTextIndex = FullTextIndexSpec(properties.chunkNodeName, listOf("text"))
 
     private val provisioner = GraphProvisioner(persistenceManager)
