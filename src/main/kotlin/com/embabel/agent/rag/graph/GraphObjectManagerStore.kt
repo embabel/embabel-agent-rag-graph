@@ -529,11 +529,31 @@ class GraphObjectManagerStore(
             ResultExpander.Method.SEQUENCE -> expandBySequence(id, elementsToAdd)
         }
 
-    /** Follow `HAS_PARENT` one hop to the typed parent — the [ZoomOutView] traversal. */
-    private fun zoomOut(id: String): List<ContentElement> =
-        listOfNotNull(
-            gom.loadAll<ZoomOutView> { where { element.id eq id } }.firstOrNull()?.parent?.toCoreType(),
-        )
+    /**
+     * Follow `HAS_PARENT` one hop to the typed parent — the [ZoomOutView] traversal.
+     *
+     * An element whose `parentId` names a real parent but which has no `HAS_PARENT` edge expands to
+     * nothing. That is not "no parent", it is an element that never went through
+     * [createInternalRelationships] — so say which, rather than return an empty list that reads like
+     * a root (embabel/embabel-agent-rag-graph#35).
+     */
+    private fun zoomOut(id: String): List<ContentElement> {
+        val view = gom.loadAll<ZoomOutView> { where { element.id eq id } }.firstOrNull()
+        if (view == null) {
+            logger.warn("zoomOut: no content element with id='{}'", id)
+            return emptyList()
+        }
+        val parent = view.parent
+        if (parent == null) {
+            logger.debug(
+                "zoomOut: element id='{}' has no HAS_PARENT edge — either it is a root, or its edges " +
+                    "were never written (createInternalRelationships)",
+                id,
+            )
+            return emptyList()
+        }
+        return listOf(parent.toCoreType())
+    }
 
     /**
      * Walk the `NEXT_CHUNK` chain ±[elementsToAdd] from the anchor (both directions) and return the
@@ -545,7 +565,20 @@ class GraphObjectManagerStore(
             depth("following", elementsToAdd)
             depth("preceding", elementsToAdd)
             where { chunk.id eq id }
-        }.firstOrNull() ?: return emptyList()
+        }.firstOrNull()
+        if (view == null) {
+            logger.warn("expandBySequence: no chunk with id='{}'", id)
+            return emptyList()
+        }
+        if (view.preceding.isEmpty() && view.following.isEmpty()) {
+            // The anchor alone. Legitimate for a one-chunk section; otherwise the NEXT_CHUNK chain was
+            // never written, and a silent single-element window is indistinguishable from one.
+            logger.debug(
+                "expandBySequence: chunk id='{}' has no NEXT_CHUNK neighbours — a single-chunk section, " +
+                    "or edges that were never written (createInternalRelationships)",
+                id,
+            )
+        }
         return (view.preceding + view.chunk + view.following)
             .sortedBy { it.sequenceNumber ?: 0L }
             .map { it.toCoreType() }

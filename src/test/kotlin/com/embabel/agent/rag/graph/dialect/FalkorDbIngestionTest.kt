@@ -28,7 +28,6 @@ import com.embabel.agent.rag.graph.DrivineCypherSearch
 import com.embabel.agent.rag.graph.GraphObjectManagerStore
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
 import com.embabel.agent.rag.graph.test.FakeEmbeddingModel
-import com.embabel.agent.rag.service.ResultExpander
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.autoconfigure.EnableDrivineTestConfig
@@ -42,7 +41,6 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
@@ -306,62 +304,4 @@ class FalkorDbIngestionTest {
     }
 
     private val logger = org.slf4j.LoggerFactory.getLogger(FalkorDbIngestionTest::class.java)
-
-    @Nested
-    inner class ExpandResult {
-
-        @Test
-        fun `sequence expansion returns adjacent chunks`() {
-            val parentId = UUID.randomUUID().toString()
-            val sectionId = "section-${UUID.randomUUID()}"
-
-            val chunks = (0..2).map { seq ->
-                Chunk.create(
-                    text = "Chunk content $seq",
-                    parentId = parentId,
-                    metadata = mapOf(
-                        "container_section_id" to sectionId,
-                        "sequence_number" to seq,
-                    ),
-                ).also { testNodeIds.add(it.id) }
-            }
-            chunks.forEach { store.save(it) }
-
-            val result = store.expandResult(
-                chunks[1].id,
-                ResultExpander.Method.SEQUENCE,
-                elementsToAdd = 1,
-            )
-
-            assertEquals(3, result.size)
-        }
-
-        @Test
-        fun `zoom out returns parent`() {
-            val parentId = UUID.randomUUID().toString()
-            testNodeIds.add(parentId)
-            val section = LeafSection(
-                id = parentId,
-                title = "Parent Section",
-                text = "Parent content",
-                parentId = "root",
-            )
-            store.save(section)
-
-            val chunk = Chunk.create(
-                text = "Child chunk",
-                parentId = parentId,
-            ).also { testNodeIds.add(it.id) }
-            store.save(chunk)
-
-            val result = store.expandResult(
-                chunk.id,
-                ResultExpander.Method.ZOOM_OUT,
-                elementsToAdd = 1,
-            )
-
-            assertEquals(1, result.size)
-            assertEquals(parentId, result.first().id)
-        }
-    }
 }

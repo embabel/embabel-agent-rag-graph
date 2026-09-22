@@ -18,10 +18,12 @@ package com.embabel.agent.rag.graph
 import com.embabel.agent.rag.model.Chunk
 import com.embabel.agent.rag.model.LeafSection
 import com.embabel.agent.rag.model.MaterializedDocument
+import com.embabel.agent.rag.service.ResultExpander
 import com.embabel.common.core.types.SimilarityResult
 import org.drivine.manager.PersistenceManager
 import org.drivine.query.QuerySpecification
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -29,10 +31,10 @@ import org.slf4j.LoggerFactory
 import java.util.UUID
 
 /**
- * Cross-engine executable **spec** for the retrieval paths — vector search, full-text search, and
- * `reembedAll` — asserting behaviour, not implementation: "a full-text search for a seeded token
- * returns that chunk", "a vector search for a chunk's own text retrieves it", "search still works
- * after reembedAll". Behaviour transitively proves the index exists under the name the search binds:
+ * Cross-engine executable **spec** for the retrieval paths — vector search, full-text search,
+ * `reembedAll`, and context **expansion** — asserting behaviour, not implementation: "a full-text
+ * search for a seeded token returns that chunk", "a vector search for a chunk's own text retrieves
+ * it", "search still works after reembedAll", "expanding a chunk returns its neighbours". Behaviour transitively proves the index exists under the name the search binds:
  * a wrongly-named, absent, or unpopulated index makes the search throw or return nothing.
  *
  * The spec is written against the [RagStoreUnderTest] seam, so the **same** contract runs against
@@ -156,6 +158,71 @@ abstract class AbstractRagSearchCharacterizationTest {
             Thread.sleep(delayMs)
         }
         return last
+    }
+
+    /**
+     * Seed a document long enough for the chunker to cut it into at least three chunks of one
+     * container section, returned in `sequence_number` order — the chain sequence expansion walks.
+     *
+     * It goes through [RagStoreUnderTest.writeAndChunkDocument] rather than saving chunks by hand,
+     * because the adjacency and parenthood **edges** expansion traverses are written by the store's
+     * post-ingestion relationship pass. Hand-saved chunks carry the structural *properties* but no
+     * edges, so expanding them returns the anchor alone — which is how #35 went unnoticed.
+     */
+    protected fun seedChunkChain(): List<Chunk> {
+        val paragraph = { n: Int ->
+            "Paragraph $n of the expansion characterization corpus. " +
+                "It describes retrieval, chunking and adjacency at enough length that the chunker " +
+                "cuts this document into several chunks rather than one. ".repeat(12)
+        }
+        val chunks = seedDocument((1..4).joinToString("\n\n") { paragraph(it) })
+        val ordered = chunks.sortedBy { it.structure.sequenceNumber ?: 0 }
+        assertTrue(
+            ordered.size >= 3,
+            "[$engineName] expansion spec needs a chain of at least 3 chunks; got ${ordered.size}",
+        )
+        return ordered
+    }
+
+    @Test
+    fun `sequence expansion returns the chunk's neighbours in order`() {
+        val chain = seedChunkChain()
+        val anchor = chain[1]
+
+        val window = store.expandResult(anchor.id, ResultExpander.Method.SEQUENCE, 1).map { it.id }
+
+        assertEquals(
+            listOf(chain[0].id, anchor.id, chain[2].id),
+            window,
+            "[$engineName] a plus/minus-one window around chunk 1 is chunks 0, 1, 2",
+        )
+    }
+
+    @Test
+    fun `sequence expansion widens with elementsToAdd`() {
+        val chain = seedChunkChain()
+        val anchor = chain[1]
+
+        val window = store.expandResult(anchor.id, ResultExpander.Method.SEQUENCE, chain.size).map { it.id }
+
+        assertEquals(
+            chain.map { it.id },
+            window,
+            "[$engineName] a window wider than the chain returns the whole chain",
+        )
+    }
+
+    @Test
+    fun `zoom out returns the chunk's parent section`() {
+        val chunk = seedChunkChain().first()
+
+        val parents = store.expandResult(chunk.id, ResultExpander.Method.ZOOM_OUT, 1).map { it.id }
+
+        assertEquals(
+            listOf(chunk.parentId),
+            parents,
+            "[$engineName] zooming out of a chunk returns the section it was cut from",
+        )
     }
 
     @Test
