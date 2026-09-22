@@ -18,13 +18,14 @@ package com.embabel.agent.rag.graph.test
 import com.embabel.agent.rag.ingestion.ChunkTransformer
 import com.embabel.agent.rag.ingestion.ContentChunker
 import com.embabel.agent.rag.graph.DrivineCypherSearch
-import com.embabel.agent.rag.graph.DrivineStore
+import com.embabel.agent.rag.graph.GraphObjectManagerStore
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
 import com.embabel.agent.rag.graph.dialect.Neo4jRagDialect
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import com.embabel.common.util.generateRandomFloatArray
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.autoconfigure.EnableDrivineTestConfig
+import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
 import org.springframework.ai.document.Document
@@ -65,7 +66,7 @@ import java.util.*
             RagShellCommands::class,
             RagChatActions::class,
             DrivineCypherSearch::class,
-            DrivineStore::class,
+            GraphObjectManagerStore::class,
         ]
     )]
 )
@@ -84,23 +85,18 @@ class TestAppContext {
     }
 
     @Bean
-    fun drivineStore(
+    fun gomStore(
+        factory: GraphObjectManagerFactory,
         persistenceManager: PersistenceManager,
         properties: GraphRagServiceProperties,
-        transactionManager: PlatformTransactionManager,
-        cypherSearch: DrivineCypherSearch
-    ): DrivineStore {
-        return DrivineStore(
-            persistenceManager = persistenceManager,
-            properties = properties,
-            chunkerConfig = ContentChunker.Config(),
-            chunkTransformer = ChunkTransformer.NO_OP,
-            platformTransactionManager = transactionManager,
-            cypherSearch = cypherSearch,
-            dialect = Neo4jRagDialect(),
-            embeddingService = SpringAiEmbeddingService("fake", "embabel", FakeEmbeddingModel())
-        )
-    }
+    ): GraphObjectManagerStore = GraphObjectManagerStore(
+        gom = factory.get("graph"),
+        persistenceManager = persistenceManager,
+        properties = properties,
+        chunkerConfig = ContentChunker.Config(),
+        chunkTransformer = ChunkTransformer.NO_OP,
+        embeddingService = SpringAiEmbeddingService("fake", "embabel", FakeEmbeddingModel()),
+    )
 }
 
 data class FakeEmbeddingModel(

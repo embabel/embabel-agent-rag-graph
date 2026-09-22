@@ -21,10 +21,15 @@ import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
 
 /**
- * The minimal store surface the cross-engine characterization spec exercises, so the *same* spec can
- * be run against more than one implementation (the current [DrivineStore] and the
- * [GraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store) — an A/B equivalence
- * check. Chunk-focused because that is all the retrieval spec needs.
+ * The minimal store surface the cross-engine characterization spec exercises, so the *same* spec
+ * runs against every engine. Chunk-focused because that is all the retrieval spec needs.
+ *
+ * It was an A/B equivalence check while `DrivineStore` still existed beside the
+ * [GraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store. That pairing is gone:
+ * nothing constructed `DrivineStore` outside tests, and the equivalence it proved was between two
+ * implementations rather than against the behaviour anyone wanted — it passed while the surviving
+ * store rebuilt its index at a stale width (#29). The interface stays because three engines still
+ * share one spec.
  */
 interface RagStoreUnderTest {
     fun provision()
@@ -33,20 +38,6 @@ interface RagStoreUnderTest {
     fun textSearchChunks(query: String, topK: Int = 10): List<SimilarityResult<out Chunk>>
     fun vectorSearchChunks(query: String, topK: Int = 10): List<SimilarityResult<out Chunk>>
     fun reembedAll(): ReembedReport
-}
-
-/** Adapts the current hand-rolled [DrivineStore] to [RagStoreUnderTest]. */
-class DrivineRagStoreAdapter(private val store: DrivineStore) : RagStoreUnderTest {
-    override fun provision() = store.provision()
-    override fun writeAndChunkDocument(doc: NavigableDocument): List<String> = store.writeAndChunkDocument(doc)
-    override fun findAllChunksById(ids: List<String>): List<Chunk> = store.findAllChunksById(ids).toList()
-    override fun textSearchChunks(query: String, topK: Int): List<SimilarityResult<out Chunk>> =
-        store.textSearch(TextSimilaritySearchRequest(query, 0.0, topK), Chunk::class.java)
-
-    override fun vectorSearchChunks(query: String, topK: Int): List<SimilarityResult<out Chunk>> =
-        store.vectorSearch(TextSimilaritySearchRequest(query, 0.0, topK), Chunk::class.java)
-
-    override fun reembedAll(): ReembedReport = store.reembedAll()
 }
 
 /** Adapts the [GraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store to [RagStoreUnderTest]. */

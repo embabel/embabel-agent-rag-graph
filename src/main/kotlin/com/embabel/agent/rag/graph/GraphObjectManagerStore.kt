@@ -162,8 +162,7 @@ class GraphObjectManagerStore(
      *
      * The result was chunks holding 3072-wide vectors under an index declaring 1536, with nothing
      * reporting it: observed on a live appliance changing text-embedding-3-small to
-     * text-embedding-3-large. `DrivineStore` states its specs with a `get()` for exactly this
-     * reason; this store was the one still caching.
+     * text-embedding-3-large. A spec that names a width must be stated with a `get()`, never cached.
      *
      * The cost of not caching is one object per access. The cost of caching it was an index that
      * cannot describe what is stored.

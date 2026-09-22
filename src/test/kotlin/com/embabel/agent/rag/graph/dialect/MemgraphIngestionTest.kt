@@ -22,7 +22,7 @@ import com.embabel.agent.rag.model.DefaultMaterializedContainerSection
 import com.embabel.agent.rag.model.LeafSection
 import com.embabel.agent.rag.model.MaterializedDocument
 import com.embabel.agent.rag.graph.DrivineCypherSearch
-import com.embabel.agent.rag.graph.DrivineStore
+import com.embabel.agent.rag.graph.GraphObjectManagerStore
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
 import com.embabel.agent.rag.graph.test.FakeEmbeddingModel
 import com.embabel.agent.rag.service.ResultExpander
@@ -31,6 +31,7 @@ import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.connection.ConnectionProperties
 import org.drivine.connection.DataSourceMap
 import org.drivine.connection.DatabaseType
+import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
 import org.drivine.query.QuerySpecification
@@ -111,27 +112,24 @@ class MemgraphIngestionTest {
         }
 
         @Bean
-        fun drivineStore(
+        fun store(
+            gomFactory: GraphObjectManagerFactory,
             persistenceManager: PersistenceManager,
             properties: GraphRagServiceProperties,
-            transactionManager: PlatformTransactionManager,
-            cypherSearch: DrivineCypherSearch,
-        ): DrivineStore {
-            return DrivineStore(
+        ): GraphObjectManagerStore {
+            return GraphObjectManagerStore(
+                gom = gomFactory.get("graph"),
                 persistenceManager = persistenceManager,
                 properties = properties,
                 chunkerConfig = ContentChunker.Config(),
                 chunkTransformer = ChunkTransformer.NO_OP,
-                platformTransactionManager = transactionManager,
-                cypherSearch = cypherSearch,
-                dialect = MemgraphRagDialect(),
                 embeddingService = SpringAiEmbeddingService("fake", "embabel", FakeEmbeddingModel()),
             )
         }
     }
 
     @Autowired
-    lateinit var drivineStore: DrivineStore
+    lateinit var store: GraphObjectManagerStore
 
     @Autowired
     @Qualifier("graph")
@@ -157,9 +155,9 @@ class MemgraphIngestionTest {
 
     @Test
     fun `provision creates indexes without errors`() {
-        drivineStore.provision()
+        store.provision()
         // Second call should be idempotent
-        drivineStore.provision()
+        store.provision()
     }
 
     @Test
@@ -174,10 +172,10 @@ class MemgraphIngestionTest {
         )
         testNodeIds.add(id)
 
-        val saved = drivineStore.save(doc)
+        val saved = store.save(doc)
         assertEquals(id, saved.id)
 
-        val found = drivineStore.findContentRootByUri(uri)
+        val found = store.findContentRootByUri(uri)
         assertNotNull(found)
         assertEquals(id, found!!.id)
     }
@@ -191,9 +189,9 @@ class MemgraphIngestionTest {
         )
         testNodeIds.add(chunk.id)
 
-        drivineStore.save(chunk)
+        store.save(chunk)
 
-        val found = drivineStore.findById(chunk.id)
+        val found = store.findById(chunk.id)
         assertNotNull(found)
         assertTrue(found is Chunk)
         assertEquals("This is test chunk content for Memgraph", (found as Chunk).text)
@@ -218,16 +216,16 @@ class MemgraphIngestionTest {
         testNodeIds.add(doc.id)
         testNodeIds.add(section.id)
 
-        val chunkIds = drivineStore.writeAndChunkDocument(doc)
+        val chunkIds = store.writeAndChunkDocument(doc)
         testNodeIds.addAll(chunkIds)
 
         assertTrue(chunkIds.isNotEmpty(), "Should have created at least one chunk")
         logger.info("Ingested document with {} chunks", chunkIds.size)
 
-        val foundDoc = drivineStore.findContentRootByUri(doc.uri)
+        val foundDoc = store.findContentRootByUri(doc.uri)
         assertNotNull(foundDoc, "Document should be retrievable by URI")
 
-        val foundChunks = drivineStore.findAllChunksById(chunkIds).toList()
+        val foundChunks = store.findAllChunksById(chunkIds).toList()
         assertEquals(chunkIds.size, foundChunks.size, "All chunks should be retrievable")
     }
 
@@ -239,10 +237,10 @@ class MemgraphIngestionTest {
         )
         testNodeIds.add(chunk.id)
 
-        drivineStore.save(chunk)
-        drivineStore.save(chunk)
+        store.save(chunk)
+        store.save(chunk)
 
-        val found = drivineStore.findById(chunk.id)
+        val found = store.findById(chunk.id)
         assertNotNull(found)
     }
 
@@ -262,9 +260,9 @@ class MemgraphIngestionTest {
                     ),
                 ).also { testNodeIds.add(it.id) }
             }
-            chunks.forEach { drivineStore.save(it) }
+            chunks.forEach { store.save(it) }
 
-            val result = drivineStore.expandResult(
+            val result = store.expandResult(
                 chunks[1].id,
                 ResultExpander.Method.SEQUENCE,
                 elementsToAdd = 1,
@@ -282,15 +280,15 @@ class MemgraphIngestionTest {
                 text = "Parent content",
                 parentId = "root",
             )
-            drivineStore.save(section)
+            store.save(section)
 
             val chunk = Chunk.create(
                 text = "Child chunk",
                 parentId = parentId,
             ).also { testNodeIds.add(it.id) }
-            drivineStore.save(chunk)
+            store.save(chunk)
 
-            val result = drivineStore.expandResult(
+            val result = store.expandResult(
                 chunk.id,
                 ResultExpander.Method.ZOOM_OUT,
                 elementsToAdd = 1,

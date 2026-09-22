@@ -18,7 +18,7 @@ package com.embabel.agent.rag.graph.test
 import com.embabel.agent.api.annotation.Action
 import com.embabel.agent.api.annotation.EmbabelComponent
 import com.embabel.agent.api.common.ActionContext
-import com.embabel.agent.rag.graph.DrivineStore
+import com.embabel.agent.rag.graph.GraphObjectManagerStore
 import com.embabel.agent.rag.tools.ToolishRag
 import com.embabel.agent.rag.tools.TryHyDE
 import com.embabel.chat.Conversation
@@ -31,13 +31,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
  *
  * This is a cut-down version of the Guide's ChatActions that:
  * - Responds to user messages with RAG-powered context
- * - Uses the DrivineStore for vector/fulltext search
+ * - Uses the GraphObjectManager-backed store for vector/fulltext search
  * - Uses a configurable LLM for response generation
  */
 @EmbabelComponent
-@ConditionalOnBean(DrivineStore::class)
+@ConditionalOnBean(GraphObjectManagerStore::class)
 class RagChatActions(
-    private val drivineStore: DrivineStore,
+    private val store: GraphObjectManagerStore,
     private val testProperties: RagTestProperties,
 ) {
 
@@ -73,7 +73,7 @@ class RagChatActions(
                 ToolishRag(
                     "docs",
                     "RAG documentation search",
-                    drivineStore
+                    store
                 ).withHint(TryHyDE.usingConversationContext())
             )
             .withSystemPrompt(SYSTEM_PROMPT)

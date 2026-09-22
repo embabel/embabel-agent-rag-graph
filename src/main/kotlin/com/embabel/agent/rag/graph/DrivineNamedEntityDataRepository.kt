@@ -56,7 +56,7 @@ import org.drivine.query.QuerySpecification
  * ## Indexing
  * This repository relies on vector and full-text indexes created on nodes with the
  * [GraphRagServiceProperties.entityNodeName] label (default: "Entity"). It provisions them itself
- * rather than depending on a store to have done it: [DrivineStore] declares the same two indexes,
+ * rather than depending on a store to have done it: the chunk store declares its own indexes,
  * but an application whose primary store is [GraphObjectManagerStore] never constructs one and would
  * leave every entity search failing against an index nobody created. See [EntitySchemaProvisioner]
  * for when that provisioning happens and why it is attempted more than once.
@@ -376,9 +376,9 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
 
     /**
      * NOTE: This method does not currently write `n.embedding`. The entity
-     * vector index is provisioned by [DrivineStore.provision] but no write
+     * vector index is provisioned by the chunk store but no write
      * path populates it yet. If you add embedding writes here, follow the
-     * `_text` convention documented on `DrivineStore.embedRetrievable`:
+     * the `_text` convention the chunk store uses when embedding:
      * persist `n._text = embeddableValue()` only when it differs from
      * `n.text`, so reembed can replay via `coalesce(n._text, n.text)`.
      */
