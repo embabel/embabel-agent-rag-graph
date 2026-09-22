@@ -25,14 +25,13 @@ import com.embabel.agent.rag.model.MaterializedDocument
 import com.embabel.agent.rag.model.NavigableDocument
 import com.embabel.agent.rag.model.LeafSection
 import com.embabel.agent.rag.graph.DrivineCypherSearch
-import com.embabel.agent.rag.graph.GraphObjectManagerStore
+import com.embabel.agent.rag.graph.DrivineStore
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
 import com.embabel.agent.rag.graph.test.FakeEmbeddingModel
 import com.embabel.agent.rag.service.ResultExpander
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.autoconfigure.EnableDrivineTestConfig
-import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
 import org.drivine.query.QuerySpecification
@@ -59,7 +58,7 @@ import java.util.UUID
 /**
  * End-to-end ingestion test against FalkorDB.
  *
- * Exercises the full chunk-store ingestion path: save document, save chunks,
+ * Exercises the full DrivineStore ingestion path: save document, save chunks,
  * create relationships, embed — the same code path that Guide's DataManager hits.
  */
 @SpringBootTest(classes = [FalkorDbIngestionTest.Config::class])
@@ -84,24 +83,27 @@ class FalkorDbIngestionTest {
         }
 
         @Bean
-        fun store(
-            gomFactory: GraphObjectManagerFactory,
+        fun drivineStore(
             persistenceManager: PersistenceManager,
             properties: GraphRagServiceProperties,
-        ): GraphObjectManagerStore {
-            return GraphObjectManagerStore(
-                gom = gomFactory.get("graph"),
+            transactionManager: PlatformTransactionManager,
+            cypherSearch: DrivineCypherSearch,
+        ): DrivineStore {
+            return DrivineStore(
                 persistenceManager = persistenceManager,
                 properties = properties,
                 chunkerConfig = ContentChunker.Config(),
                 chunkTransformer = ChunkTransformer.NO_OP,
+                platformTransactionManager = transactionManager,
+                cypherSearch = cypherSearch,
+                dialect = FalkorDbRagDialect(),
                 embeddingService = SpringAiEmbeddingService("fake", "embabel", FakeEmbeddingModel()),
             )
         }
     }
 
     @Autowired
-    lateinit var store: GraphObjectManagerStore
+    lateinit var drivineStore: DrivineStore
 
     @Autowired
     @Qualifier("graph")
@@ -126,9 +128,9 @@ class FalkorDbIngestionTest {
 
     @Test
     fun `provision creates indexes without errors`() {
-        store.provision()
+        drivineStore.provision()
         // Second call should be idempotent
-        store.provision()
+        drivineStore.provision()
     }
 
     @Test
@@ -143,10 +145,10 @@ class FalkorDbIngestionTest {
         )
         testNodeIds.add(id)
 
-        val saved = store.save(doc)
+        val saved = drivineStore.save(doc)
         assertEquals(id, saved.id)
 
-        val found = store.findContentRootByUri(uri)
+        val found = drivineStore.findContentRootByUri(uri)
         assertNotNull(found)
         assertEquals(id, found!!.id)
     }
@@ -164,9 +166,9 @@ class FalkorDbIngestionTest {
         )
         testNodeIds.add(chunk.id)
 
-        store.save(chunk)
+        drivineStore.save(chunk)
 
-        val found = store.findById(chunk.id)
+        val found = drivineStore.findById(chunk.id)
         assertNotNull(found)
         assertTrue(found is Chunk)
         assertEquals("This is test chunk content for FalkorDB", (found as Chunk).text)
@@ -184,7 +186,7 @@ class FalkorDbIngestionTest {
             text = "Section content",
             parentId = "root",
         )
-        store.save(section)
+        drivineStore.save(section)
 
         // Save chunks
         val chunks = (0..2).map { seq ->
@@ -197,10 +199,10 @@ class FalkorDbIngestionTest {
                 ),
             ).also { testNodeIds.add(it.id) }
         }
-        chunks.forEach { store.save(it) }
+        chunks.forEach { drivineStore.save(it) }
 
         // Verify all chunks saved
-        val allChunks = store.findAllChunksById(chunks.map { it.id }).toList()
+        val allChunks = drivineStore.findAllChunksById(chunks.map { it.id }).toList()
         assertEquals(3, allChunks.size)
     }
 
@@ -211,10 +213,10 @@ class FalkorDbIngestionTest {
         val doc = MaterializedDocument(id = id, uri = uri, title = "Root Doc", children = emptyList())
         testNodeIds.add(id)
 
-        store.save(doc)
+        drivineStore.save(doc)
 
-        assertTrue(store.existsRootWithUri(uri))
-        assertNull(store.findContentRootByUri("test://non-existent"))
+        assertTrue(drivineStore.existsRootWithUri(uri))
+        assertNull(drivineStore.findContentRootByUri("test://non-existent"))
     }
 
     @Test
@@ -225,12 +227,12 @@ class FalkorDbIngestionTest {
         )
         testNodeIds.add(chunk.id)
 
-        store.save(chunk)
-        store.save(chunk)
+        drivineStore.save(chunk)
+        drivineStore.save(chunk)
 
-        val count = store.count(Chunk::class.java, null)
+        val count = drivineStore.count(Chunk::class.java, null)
         // Should have exactly one chunk with this id, not two
-        val found = store.findById(chunk.id)
+        val found = drivineStore.findById(chunk.id)
         assertNotNull(found)
     }
 
@@ -256,7 +258,7 @@ class FalkorDbIngestionTest {
 
         // This exercises the full path: save doc, save sections, chunk,
         // save chunks, embed, create relationships
-        val chunkIds = store.writeAndChunkDocument(doc)
+        val chunkIds = drivineStore.writeAndChunkDocument(doc)
 
         testNodeIds.addAll(chunkIds)
 
@@ -264,11 +266,11 @@ class FalkorDbIngestionTest {
         logger.info("Ingested document with {} chunks", chunkIds.size)
 
         // Verify document was saved
-        val foundDoc = store.findContentRootByUri(doc.uri)
+        val foundDoc = drivineStore.findContentRootByUri(doc.uri)
         assertNotNull(foundDoc, "Document should be retrievable by URI")
 
         // Verify chunks were saved
-        val foundChunks = store.findAllChunksById(chunkIds).toList()
+        val foundChunks = drivineStore.findAllChunksById(chunkIds).toList()
         assertEquals(chunkIds.size, foundChunks.size, "All chunks should be retrievable")
     }
 
@@ -295,13 +297,13 @@ class FalkorDbIngestionTest {
             .forEach { testNodeIds.add(it.id) }
 
         logger.info("Starting writeAndChunkDocument...")
-        val chunkIds = store.writeAndChunkDocument(doc)
+        val chunkIds = drivineStore.writeAndChunkDocument(doc)
         testNodeIds.addAll(chunkIds)
 
         logger.info("Ingestion complete: {} chunks", chunkIds.size)
         assertTrue(chunkIds.isNotEmpty(), "Should have created chunks")
 
-        val foundDoc = store.findContentRootByUri(url)
+        val foundDoc = drivineStore.findContentRootByUri(url)
         assertNotNull(foundDoc, "Document should be retrievable by URI")
     }
 
@@ -325,9 +327,9 @@ class FalkorDbIngestionTest {
                     ),
                 ).also { testNodeIds.add(it.id) }
             }
-            chunks.forEach { store.save(it) }
+            chunks.forEach { drivineStore.save(it) }
 
-            val result = store.expandResult(
+            val result = drivineStore.expandResult(
                 chunks[1].id,
                 ResultExpander.Method.SEQUENCE,
                 elementsToAdd = 1,
@@ -346,15 +348,15 @@ class FalkorDbIngestionTest {
                 text = "Parent content",
                 parentId = "root",
             )
-            store.save(section)
+            drivineStore.save(section)
 
             val chunk = Chunk.create(
                 text = "Child chunk",
                 parentId = parentId,
             ).also { testNodeIds.add(it.id) }
-            store.save(chunk)
+            drivineStore.save(chunk)
 
-            val result = store.expandResult(
+            val result = drivineStore.expandResult(
                 chunk.id,
                 ResultExpander.Method.ZOOM_OUT,
                 elementsToAdd = 1,

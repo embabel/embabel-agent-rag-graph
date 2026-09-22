@@ -36,7 +36,7 @@ import java.util.UUID
  * a wrongly-named, absent, or unpopulated index makes the search throw or return nothing.
  *
  * The spec is written against the [RagStoreUnderTest] seam, so the **same** contract runs against
- * every engine — through the
+ * both store implementations — the current hand-rolled [DrivineStore] and the
  * [GraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store — on each of Neo4j,
  * FalkorDB, and Memgraph. When the new store's column of that matrix is fully green it is a proven
  * drop-in for the old one.
@@ -89,7 +89,7 @@ abstract class AbstractRagSearchCharacterizationTest {
 
     /**
      * Ingest a single-section document through the real public ingestion path
-     * ([RagStoreUnderTest.writeAndChunkDocument]), which chunks *and embeds* the text. Returns the
+     * ([DrivineStore.writeAndChunkDocument]), which chunks *and embeds* the text. Returns the
      * persisted, embedded chunks.
      */
     protected fun seedDocument(text: String): List<Chunk> {

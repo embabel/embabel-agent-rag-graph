@@ -43,7 +43,7 @@ import org.springframework.test.context.ActiveProfiles
 /**
  * The repository provisions the two entity indexes its searches bind by name.
  *
- * The regression this pins: the chunk store used to be the only declaration of those indexes, and an
+ * The regression this pins: [DrivineStore] used to be the only declaration of those indexes, and an
  * application whose primary store is [GraphObjectManagerStore] never constructs one — that store
  * models no entities, so it provisions none. Every entity search then failed against an index nobody
  * had created ("There is no such vector schema index"), while the only advice logged was to call a

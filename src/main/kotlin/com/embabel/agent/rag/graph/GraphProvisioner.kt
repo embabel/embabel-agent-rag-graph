@@ -24,7 +24,7 @@ import org.drivine.schema.VectorIndexSpec
 import org.slf4j.LoggerFactory
 
 /**
- * Graph-structure provisioning for [GraphObjectManagerStore] and the entity schema — the mechanics
+ * Graph-structure provisioning shared by [DrivineStore] and [GraphObjectManagerStore] — the mechanics
  * they had duplicated: applying a schema through Drivine's index/constraint managers, and creating the
  * `HAS_PARENT` hierarchy edges.
  *
@@ -45,7 +45,7 @@ class GraphProvisioner(
      * database.
      *
      * Drivine's `ensure` matches an index by `(label, properties)` and **ignores the name** — by design,
-     * it reports and the caller decides. So an index created under other settings (e.g. a different
+     * it reports and the caller decides. So an index created by the *other* store (e.g. [DrivineStore]
      * under a different name) satisfies `ensure` and is left in place — but `gom.loadNearest` /
      * `loadMatching` resolve by the *convention* name, so search would fail. Our decision:
      * [ensureUnderConventionName] recreates such an index under the spec's convention name. This makes a
@@ -54,7 +54,7 @@ class GraphProvisioner(
      *
      * It is one-time **per direction**, not per A/B cycle. Where the two stores resolve *different* names
      * for the same index — the chunk vector index ([GraphObjectManagerStore] uses the convention name,
-     * a configured `contentElementIndex`) — each flip rebuilds it, with degraded vector
+     * [DrivineStore] its configured `contentElementIndex`) — each flip rebuilds it, with degraded vector
      * recall until it completes. The chunk full-text index name *is* aligned across both stores, so it is
      * not rebuilt on a flip; aligning the vector index name too would make the A/B switch seamless.
      */
