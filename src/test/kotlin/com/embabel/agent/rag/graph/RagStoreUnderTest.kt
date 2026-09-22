@@ -16,13 +16,17 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.agent.rag.model.Chunk
+import com.embabel.agent.rag.model.ContentElement
 import com.embabel.agent.rag.model.NavigableDocument
+import com.embabel.agent.rag.service.ResultExpander
 import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
 
 /**
  * The minimal store surface the cross-engine characterization spec exercises, so the *same* spec
- * runs against every engine. Chunk-focused because that is all the retrieval spec needs.
+ * runs against every engine. Chunk-focused, plus [expandResult]: expansion is served by edges the
+ * store writes during ingestion, so leaving it off the surface let a whole traversal go unasserted on
+ * two of the three engines (embabel/embabel-agent-rag-graph#35).
  *
  * It was an A/B equivalence check while `DrivineStore` still existed beside the
  * [GraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store. That pairing is gone:
@@ -38,6 +42,7 @@ interface RagStoreUnderTest {
     fun textSearchChunks(query: String, topK: Int = 10): List<SimilarityResult<out Chunk>>
     fun vectorSearchChunks(query: String, topK: Int = 10): List<SimilarityResult<out Chunk>>
     fun reembedAll(): ReembedReport
+    fun expandResult(id: String, method: ResultExpander.Method, elementsToAdd: Int): List<ContentElement>
 }
 
 /** Adapts the [GraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store to [RagStoreUnderTest]. */
@@ -52,4 +57,10 @@ class GomRagStoreAdapter(private val store: GraphObjectManagerStore) : RagStoreU
         store.vectorSearch(TextSimilaritySearchRequest(query, 0.0, topK), Chunk::class.java)
 
     override fun reembedAll(): ReembedReport = store.reembedAll()
+
+    override fun expandResult(
+        id: String,
+        method: ResultExpander.Method,
+        elementsToAdd: Int,
+    ): List<ContentElement> = store.expandResult(id, method, elementsToAdd)
 }
