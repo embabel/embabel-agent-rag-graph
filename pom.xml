@@ -24,7 +24,25 @@
         <!-- Overrides the parent's default: the Drivine KSP-generated DSL uses context parameters
              (Kotlin 2.2+), so this module and its codegen-gradle build compile with 2.3.21. -->
         <kotlin.version>2.3.21</kotlin.version>
+        <!-- Wrapper script for the KSP codegen sub-build. The Unix default; the `windows` profile
+             below swaps in gradlew.bat, because exec-maven-plugin hands the path straight to
+             CreateProcess, which rejects the extensionless shell script with error=193. -->
+        <codegen.gradlew>${project.basedir}/codegen-gradle/gradlew</codegen.gradlew>
     </properties>
+
+    <profiles>
+        <profile>
+            <id>windows</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <properties>
+                <codegen.gradlew>${project.basedir}/codegen-gradle/gradlew.bat</codegen.gradlew>
+            </properties>
+        </profile>
+    </profiles>
 
     <dependencyManagement>
         <dependencies>
@@ -154,9 +172,8 @@
                             <goal>exec</goal>
                         </goals>
                         <configuration>
-                            <!-- Unix gradlew. On Windows this needs codegen-gradle/gradlew.bat (shipped);
-                                 a fully portable build would OS-switch this <executable> via a profile. -->
-                            <executable>${project.basedir}/codegen-gradle/gradlew</executable>
+                            <!-- gradlew on Unix, gradlew.bat on Windows: see the `windows` profile. -->
+                            <executable>${codegen.gradlew}</executable>
                             <workingDirectory>${project.basedir}/codegen-gradle</workingDirectory>
                             <!-- Pass the pom's versions to the Gradle codegen so it generates the DSL
                                  against the same drivine / embabel this module compiles against (pom is
