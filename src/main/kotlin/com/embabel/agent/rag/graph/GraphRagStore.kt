@@ -42,5 +42,12 @@ interface GraphRagStore :
     ResultExpander,
     RagFacetProvider {
 
+    /**
+     * Re-embed stored content with the current embedding model and rebuild the vector indexes.
+     *
+     * @throws com.embabel.agent.rag.store.EmbeddingIncompleteException if some chunks could not be
+     * embedded. The indexes are rebuilt and the other chunks saved first, and calling this again is a
+     * safe retry.
+     */
     fun reembedAll(): ReembedReport
 }

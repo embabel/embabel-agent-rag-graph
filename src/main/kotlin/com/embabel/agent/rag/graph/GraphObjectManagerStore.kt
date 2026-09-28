@@ -57,6 +57,9 @@ import com.embabel.agent.rag.service.support.RagFacetResults
 import com.embabel.agent.rag.store.ContentElementRepositoryInfo
 import com.embabel.agent.rag.store.DocumentDeletionResult
 import com.embabel.agent.rag.store.EmbeddingAwareChunkingContentElementRepository
+import com.embabel.agent.rag.store.EmbeddingBatchGenerator
+import com.embabel.agent.rag.store.EmbeddingBatchResult
+import com.embabel.agent.rag.store.EmbeddingIncompleteException
 import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
@@ -74,7 +77,7 @@ import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
 
-/** Window size for [GraphObjectManagerStore.reembedChunks] — bounds heap and per-request embedding size. */
+/** Window size for [GraphObjectManagerStore.reembedAll] — bounds heap and per-request embedding size. */
 private const val REEMBED_BATCH_SIZE = 256
 
 /**
@@ -383,29 +386,84 @@ class GraphObjectManagerStore(
         return RagFacetResults(facetName = name, results = merged)
     }
 
+    /**
+     * Re-embed every chunk with the current model, then rebuild the chunk vector index.
+     *
+     * The index is rebuilt even if re-embedding fails part way, so vector search is never left without
+     * one. A failed embedding batch is retried in halves (see [EmbeddingBatchGenerator]). A chunk that
+     * still can't be embedded is saved with no vector, so a stale vector from the previous model never
+     * sits under an index declaring the new width; it still matches full-text search.
+     *
+     * @throws EmbeddingIncompleteException after the index is rebuilt, if some chunks could not be
+     * embedded. The others are saved. Calling this again re-embeds every chunk, so it is a safe retry.
+     */
     override fun reembedAll(): ReembedReport {
         logger.info("reembedAll (gom store) start. model={} dim={}", embeddingService.name, embeddingService.dimensions)
         persistenceManager.indexes.drop(chunkVectorIndex)
-        val chunks = reembedChunks()
-        provision()
-        logger.info("reembedAll (gom store) done. chunks={}", chunks)
-        return ReembedReport(chunks = chunks, entities = 0)
+        val outcome = try {
+            reembedEveryChunk()
+        } finally {
+            provision()
+        }
+        logger.info(
+            "reembedAll (gom store) done. chunks={} missing={}",
+            outcome.embedded,
+            outcome.missingChunkIds.size,
+        )
+        outcome.failure()?.let { throw it }
+        return ReembedReport(chunks = outcome.embedded, entities = 0)
     }
 
     /**
      * Re-embed every persisted chunk: load the [ChunkNode]s, recompute embeddings from their text, and
      * save them back through the object manager (Drivine rewrites the engine-native vector).
+     *
+     * One window of [REEMBED_BATCH_SIZE] chunks at a time, so a second full copy of every chunk is never
+     * held. Once a window embeds nothing at all, the service is treated as unavailable and the remaining
+     * chunks are recorded missing without being sent.
      */
-    private fun reembedChunks(): Int {
+    private fun reembedEveryChunk(): ReembedOutcome {
         val chunks = gom.loadAll<ChunkNode>().filter { it.text.isNotBlank() }
-        if (chunks.isEmpty()) return 0
-        // Re-embed and save one window at a time so we never hold a second full copy of every chunk, nor
-        // send one oversized embedding request — each batch is embedded, saved, and released.
-        chunks.chunked(REEMBED_BATCH_SIZE).forEach { batch ->
-            val vectors = embeddingService.embed(batch.map { it.text })
-            gom.saveAll(batch.mapIndexed { i, node -> node.copy(embedding = vectors[i].toList()) })
+        return chunks.chunked(REEMBED_BATCH_SIZE).fold(ReembedOutcome()) { outcome, window ->
+            if (outcome.abandoned) {
+                gom.saveAll(window.map { it.copy(embedding = null) })
+                outcome.plusMissing(window.map { it.id })
+            } else {
+                val result = EmbeddingBatchGenerator.embedInBatches(
+                    embeddingService,
+                    window.map { it.toCoreType() },
+                    chunkerConfig.embeddingBatchSize,
+                    logger,
+                )
+                gom.saveAll(window.map { it.copy(embedding = result.embeddings[it.id]?.toList()) })
+                outcome.plus(result)
+            }
         }
-        return chunks.size
+    }
+
+    /** What [reembedEveryChunk] did, window by window. */
+    private data class ReembedOutcome(
+        val embedded: Int = 0,
+        val missingChunkIds: List<String> = emptyList(),
+        val cause: Throwable? = null,
+        val abandoned: Boolean = false,
+    ) {
+        fun plus(result: EmbeddingBatchResult) = copy(
+            embedded = embedded + result.embeddings.size,
+            missingChunkIds = missingChunkIds + result.missingChunkIds,
+            cause = result.cause ?: cause,
+            abandoned = result.embeddings.isEmpty() && !result.isComplete,
+        )
+
+        fun plusMissing(ids: List<String>) = copy(missingChunkIds = missingChunkIds + ids)
+
+        fun failure(): EmbeddingIncompleteException? =
+            if (missingChunkIds.isEmpty()) null
+            else EmbeddingIncompleteException(
+                missingChunkIds = missingChunkIds,
+                embeddedCount = embedded,
+                cause = requireNotNull(cause) { "missing embeddings must carry the failure that caused them" },
+            )
     }
 
     /** Load any persisted content element, dispatched to the right model by its labels. */
