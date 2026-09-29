@@ -64,6 +64,7 @@ import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
 import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.NullPolicy
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.count
 import org.drivine.manager.load
@@ -426,7 +427,7 @@ class GraphObjectManagerStore(
         val chunks = gom.loadAll<ChunkNode>().filter { it.text.isNotBlank() }
         return chunks.chunked(REEMBED_BATCH_SIZE).fold(ReembedOutcome()) { outcome, window ->
             if (outcome.abandoned) {
-                gom.saveAll(window.map { it.copy(embedding = null) })
+                clearEmbeddings(window)
                 outcome.plusMissing(window.map { it.id })
             } else {
                 val result = EmbeddingBatchGenerator.embedInBatches(
@@ -435,9 +436,22 @@ class GraphObjectManagerStore(
                     chunkerConfig.embeddingBatchSize,
                     logger,
                 )
-                gom.saveAll(window.map { it.copy(embedding = result.embeddings[it.id]?.toList()) })
+                val (embedded, failed) = window.partition { it.id in result.embeddings }
+                gom.saveAll(embedded.map { it.copy(embedding = result.embeddings.getValue(it.id).toList()) })
+                clearEmbeddings(failed)
                 outcome.plus(result)
             }
+        }
+    }
+
+    /**
+     * Remove the stored vector from [nodes]. The default save skips null fields, so a null embedding
+     * alone would leave the previous model's vector in place; [NullPolicy.CLEAR] writes the null. Safe
+     * here because every node was loaded whole.
+     */
+    private fun clearEmbeddings(nodes: List<ChunkNode>) {
+        if (nodes.isNotEmpty()) {
+            gom.saveAll(nodes.map { it.copy(embedding = null) }, nullPolicy = NullPolicy.CLEAR)
         }
     }
 

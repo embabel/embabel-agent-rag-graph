@@ -26,6 +26,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import io.mockk.verifyOrder
 import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.NullPolicy
 import org.drivine.manager.PersistenceManager
 import org.drivine.schema.EnsureResult
 import org.drivine.schema.IndexManager
@@ -68,6 +69,7 @@ class ReembedSurvivesAFailedBatchTest {
         every { indexes.ensure(any()) } answers { EnsureResult.Created(SchemaItemInfo.fromSpec(firstArg())) }
     }
     private val saved = mutableListOf<ChunkNode>()
+    private val cleared = mutableSetOf<String>()
 
     private fun chunks(count: Int) = (1..count).map { i ->
         ChunkNode(id = "c$i", text = "Text $i", urtext = "Text $i", parentId = "p", embedding = listOf(0f, 0f))
@@ -75,9 +77,11 @@ class ReembedSurvivesAFailedBatchTest {
 
     private fun store(embedding: EmbeddingService, nodes: List<ChunkNode>): GraphObjectManagerStore {
         every { gom.loadAll(ChunkNode::class.java) } returns nodes
-        every { gom.saveAll(any<List<ChunkNode>>()) } answers {
-            saved += firstArg<List<ChunkNode>>()
-            firstArg()
+        every { gom.saveAll(any<List<ChunkNode>>(), any(), any()) } answers {
+            val nodes = firstArg<List<ChunkNode>>()
+            saved += nodes
+            if (thirdArg<NullPolicy>() == NullPolicy.CLEAR) cleared += nodes.map { it.id }
+            nodes
         }
         return GraphObjectManagerStore(
             gom = gom,
@@ -112,6 +116,7 @@ class ReembedSurvivesAFailedBatchTest {
         val byId = saved.associateBy { it.id }
         assertEquals(8, byId.size)
         assertNull(byId.getValue("c3").embedding, "an old-model vector must not sit under the new index")
+        assertEquals(setOf("c3"), cleared, "only a save that clears nulls removes the stored vector")
         assertTrue(byId.filterKeys { it != "c3" }.values.all { it.embedding == List(width) { 1f } })
     }
 
