@@ -420,29 +420,53 @@ class GraphObjectManagerStore(
      * save them back through the object manager (Drivine rewrites the engine-native vector).
      *
      * One window of [REEMBED_BATCH_SIZE] chunks at a time, so a second full copy of every chunk is never
-     * held. Once a window embeds nothing at all, the service is treated as unavailable and the remaining
-     * chunks are recorded missing without being sent.
+     * held. Once a window embeds nothing at all, the service may be unavailable, so the next window is
+     * probed with a single chunk before it is sent. After each failed probe, the number of windows
+     * skipped before the next probe doubles (1, 2, 4, …), so a dead service costs a call per doubling
+     * rather than a window of calls each time. A probe that succeeds resumes normal re-embedding, so a
+     * run of chunks the model always rejects stops only its own window rather than every window after it.
      */
     private fun reembedEveryChunk(): ReembedOutcome {
         val chunks = gom.loadAll<ChunkNode>().filter { it.text.isNotBlank() }
         return chunks.chunked(REEMBED_BATCH_SIZE).fold(ReembedOutcome()) { outcome, window ->
-            if (outcome.abandoned) {
-                clearEmbeddings(window)
-                outcome.plusMissing(window.map { it.id })
-            } else {
-                val result = EmbeddingBatchGenerator.embedInBatches(
-                    embeddingService,
-                    window.map { it.toCoreType() },
-                    chunkerConfig.embeddingBatchSize,
-                    logger,
-                )
-                val (embedded, failed) = window.partition { it.id in result.embeddings }
-                gom.saveAll(embedded.map { it.copy(embedding = result.embeddings.getValue(it.id).toList()) })
-                clearEmbeddings(failed)
-                outcome.plus(result)
+            when {
+                outcome.windowsToSkip > 0 -> {
+                    clearEmbeddings(window)
+                    outcome.skipped(window.map { it.id })
+                }
+                outcome.suspect -> {
+                    val failure = probe(window.first())
+                    if (failure == null) {
+                        outcome.plus(embedWindow(window))
+                    } else {
+                        clearEmbeddings(window)
+                        outcome.probeFailed(window.map { it.id }, failure)
+                    }
+                }
+                else -> outcome.plus(embedWindow(window))
             }
         }
     }
+
+    /** Embed and save one window, clearing the vector of any chunk that could not be embedded. */
+    private fun embedWindow(window: List<ChunkNode>): EmbeddingBatchResult {
+        val result = EmbeddingBatchGenerator.embedInBatches(
+            embeddingService,
+            window.map { it.toCoreType() },
+            chunkerConfig.embeddingBatchSize,
+            logger,
+        )
+        val (embedded, failed) = window.partition { it.id in result.embeddings }
+        gom.saveAll(embedded.map { it.copy(embedding = result.embeddings.getValue(it.id).toList()) })
+        clearEmbeddings(failed)
+        return result
+    }
+
+    /** One call with one chunk: null if the service embedded it, otherwise the failure. */
+    private fun probe(chunk: ChunkNode): Throwable? =
+        runCatching { embeddingService.embed(listOf(chunk.toCoreType().embeddableValue())) }
+            .exceptionOrNull()
+            ?.also { logger.warn("reembedAll: probe with chunk {} failed: {}", chunk.id, it.message) }
 
     /**
      * Remove the stored vector from [nodes]. The default save skips null fields, so a null embedding
@@ -455,21 +479,33 @@ class GraphObjectManagerStore(
         }
     }
 
-    /** What [reembedEveryChunk] did, window by window. */
+    /** What [reembedEveryChunk] did, window by window, and whether the next window is probed or skipped. */
     private data class ReembedOutcome(
         val embedded: Int = 0,
         val missingChunkIds: List<String> = emptyList(),
         val cause: Throwable? = null,
-        val abandoned: Boolean = false,
+        /** The last window embedded nothing, or its probe failed: probe before sending the next. */
+        val suspect: Boolean = false,
+        val windowsToSkip: Int = 0,
+        /** Windows to skip after the next failed probe. */
+        val skipAfterProbe: Int = 1,
     ) {
         fun plus(result: EmbeddingBatchResult) = copy(
             embedded = embedded + result.embeddings.size,
             missingChunkIds = missingChunkIds + result.missingChunkIds,
             cause = result.cause ?: cause,
-            abandoned = result.embeddings.isEmpty() && !result.isComplete,
+            suspect = result.embeddings.isEmpty() && !result.isComplete,
+            skipAfterProbe = if (result.embeddings.isEmpty()) skipAfterProbe else 1,
         )
 
-        fun plusMissing(ids: List<String>) = copy(missingChunkIds = missingChunkIds + ids)
+        fun skipped(ids: List<String>) = copy(missingChunkIds = missingChunkIds + ids, windowsToSkip = windowsToSkip - 1)
+
+        fun probeFailed(ids: List<String>, failure: Throwable) = copy(
+            missingChunkIds = missingChunkIds + ids,
+            cause = failure,
+            windowsToSkip = skipAfterProbe,
+            skipAfterProbe = skipAfterProbe * 2,
+        )
 
         fun failure(): EmbeddingIncompleteException? =
             if (missingChunkIds.isEmpty()) null

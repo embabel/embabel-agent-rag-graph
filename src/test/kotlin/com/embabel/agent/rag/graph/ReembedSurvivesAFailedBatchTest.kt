@@ -134,6 +134,50 @@ class ReembedSurvivesAFailedBatchTest {
     }
 
     @Test
+    fun `a window of chunks the model always rejects does not stop the windows after it`() {
+        val nodes = chunks(800)
+        val store = store(Rejecting(nodes.take(256).map { it.text }.toSet()), nodes)
+
+        val e = assertThrows<EmbeddingIncompleteException> { store.reembedAll() }
+
+        assertEquals(nodes.take(256).map { it.id }, e.missingChunkIds)
+        assertEquals(544, e.embeddedCount)
+    }
+
+    @Test
+    fun `a dead service is probed at doubling gaps, one call per probe`() {
+        val nodes = chunks(20 * 256)
+        val service = Rejecting(nodes.map { it.text }.toSet())
+        val store = store(service, nodes)
+
+        val e = assertThrows<EmbeddingIncompleteException> { store.reembedAll() }
+
+        assertEquals(nodes.size, e.missingChunkIds.size)
+        // About 5 calls to give up on the first window, then probes before windows 2, 4, 7 and 12.
+        assertTrue(service.calls.get() <= 12, "made ${service.calls.get()} calls to a dead service")
+        verify { indexes.ensure(any()) }
+    }
+
+    @Test
+    fun `a service that comes back is used again`() {
+        val nodes = chunks(4 * 256)
+        val failing = AtomicInteger(6)
+        val service = object : EmbeddingService by Rejecting(emptySet()) {
+            override fun embed(texts: List<String>): List<FloatArray> {
+                check(failing.getAndDecrement() <= 0) { "service unavailable" }
+                return texts.map { FloatArray(width) { 1f } }
+            }
+        }
+        val store = store(service, nodes)
+
+        val e = assertThrows<EmbeddingIncompleteException> { store.reembedAll() }
+
+        assertTrue(nodes.take(256).all { it.id in e.missingChunkIds }, "the first window failed")
+        val last = saved.filter { it.id in nodes.takeLast(256).map { n -> n.id } }
+        assertTrue(last.isNotEmpty() && last.all { it.embedding == List(width) { 1f } }, "the last window was re-embedded")
+    }
+
+    @Test
     fun `a clean re-embed reports every chunk and throws nothing`() {
         val store = store(Rejecting(emptySet()), chunks(8))
 
