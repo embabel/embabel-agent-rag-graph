@@ -32,6 +32,7 @@ import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.VectorIndexSpec
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -325,9 +326,11 @@ class Neo4jVectorRecallSearchKTest {
         println("[gom] metadata on disk         -> tenant=$onDisk")
         println("[gom] metadata via loadNearest -> ${viaSearch.freeFormMetadata}")
 
-        assertEquals(TENANT, onDisk, "precondition: the bagged key is on disk")
+        // Compared with this node's own value, not TENANT: the corpus is half "a" and half "b", and the
+        // index is approximate and quantized, so which tenant's node comes back first varies by run.
+        assertNotNull(onDisk, "precondition: the bagged key is on disk")
         assertEquals(
-            TENANT, viaSearch.freeFormMetadata["tenant"],
+            onDisk, viaSearch.freeFormMetadata["tenant"],
             "the bagged scoping key must survive the vector search projection",
         )
     }
