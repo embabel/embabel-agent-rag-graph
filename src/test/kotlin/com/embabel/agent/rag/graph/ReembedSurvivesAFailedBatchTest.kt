@@ -16,6 +16,7 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.agent.rag.graph.model.ChunkNode
+import com.embabel.agent.rag.graph.model.ChunkNodeQueryDsl
 import com.embabel.agent.rag.ingestion.ChunkTransformer
 import com.embabel.agent.rag.ingestion.ContentChunker
 import com.embabel.agent.rag.store.EmbeddingIncompleteException
@@ -28,6 +29,7 @@ import io.mockk.verifyOrder
 import org.drivine.manager.GraphObjectManager
 import org.drivine.manager.NullPolicy
 import org.drivine.manager.PersistenceManager
+import org.drivine.query.QuerySpecification
 import org.drivine.schema.EnsureResult
 import org.drivine.schema.IndexManager
 import org.drivine.schema.SchemaItemInfo
@@ -76,7 +78,9 @@ class ReembedSurvivesAFailedBatchTest {
     }
 
     private fun store(embedding: EmbeddingService, nodes: List<ChunkNode>): GraphObjectManagerStore {
-        every { gom.loadAll(ChunkNode::class.java) } returns nodes
+        // The ids are listed first, then served a window at a time, as the store loads them.
+        every { persistence.query(any<QuerySpecification<Any>>()) } returns nodes.map { it.id }
+        every { gom.loadAll(ChunkNode::class.java, any<ChunkNodeQueryDsl>(), any()) } returnsMany nodes.chunked(256)
         every { gom.saveAll(any<List<ChunkNode>>(), any(), any()) } answers {
             val nodes = firstArg<List<ChunkNode>>()
             saved += nodes
@@ -184,5 +188,15 @@ class ReembedSurvivesAFailedBatchTest {
         val report = store.reembedAll()
 
         assertEquals(ReembedReport(chunks = 8, entities = 0), report)
+    }
+
+    @Test
+    fun `a re-embed never loads every chunk at once`() {
+        val store = store(Rejecting(emptySet()), chunks(3 * 256))
+
+        store.reembedAll()
+
+        verify(exactly = 0) { gom.loadAll(ChunkNode::class.java) }
+        verify(exactly = 3) { gom.loadAll(ChunkNode::class.java, any<ChunkNodeQueryDsl>(), any()) }
     }
 }

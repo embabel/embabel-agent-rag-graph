@@ -419,34 +419,51 @@ class GraphObjectManagerStore(
      * Re-embed every persisted chunk: load the [ChunkNode]s, recompute embeddings from their text, and
      * save them back through the object manager (Drivine rewrites the engine-native vector).
      *
-     * One window of [REEMBED_BATCH_SIZE] chunks at a time, so a second full copy of every chunk is never
-     * held. Once a window embeds nothing at all, the service may be unavailable, so the next window is
-     * probed with a single chunk before it is sent. After each failed probe, the number of windows
+     * One window of [REEMBED_BATCH_SIZE] chunks at a time: the ids are listed first and each window is
+     * loaded by id, so no more than one window of chunks, each with its old vector, is ever on the heap.
+     * Once a window embeds nothing at all, the service may be unavailable, so the next window is probed
+     * with a single chunk before it is sent. After each failed probe, the number of windows
      * skipped before the next probe doubles (1, 2, 4, …), so a dead service costs a call per doubling
      * rather than a window of calls each time. A probe that succeeds resumes normal re-embedding, so a
      * run of chunks the model always rejects stops only its own window rather than every window after it.
      */
-    private fun reembedEveryChunk(): ReembedOutcome {
-        val chunks = gom.loadAll<ChunkNode>().filter { it.text.isNotBlank() }
-        return chunks.chunked(REEMBED_BATCH_SIZE).fold(ReembedOutcome()) { outcome, window ->
-            when {
-                outcome.windowsToSkip > 0 -> {
-                    clearEmbeddings(window)
-                    outcome.skipped(window.map { it.id })
-                }
-                outcome.suspect -> {
-                    val failure = probe(window.first())
-                    if (failure == null) {
-                        outcome.plus(embedWindow(window))
-                    } else {
+    private fun reembedEveryChunk(): ReembedOutcome =
+        allChunkIds().chunked(REEMBED_BATCH_SIZE).asSequence()
+            .map { ids -> loadChunks(ids).filter { it.text.isNotBlank() } }
+            .filter { it.isNotEmpty() }
+            .fold(ReembedOutcome()) { outcome, window ->
+                when {
+                    outcome.windowsToSkip > 0 -> {
                         clearEmbeddings(window)
-                        outcome.probeFailed(window.map { it.id }, failure)
+                        outcome.skipped(window.map { it.id })
                     }
+                    outcome.suspect -> {
+                        val failure = probe(window.first())
+                        if (failure == null) {
+                            outcome.plus(embedWindow(window))
+                        } else {
+                            clearEmbeddings(window)
+                            outcome.probeFailed(window.map { it.id }, failure)
+                        }
+                    }
+                    else -> outcome.plus(embedWindow(window))
                 }
-                else -> outcome.plus(embedWindow(window))
             }
-        }
-    }
+
+    /** Every chunk's id: a scalar each, so the whole list is small however large the store. */
+    private fun allChunkIds(): List<String> =
+        persistenceManager.queryForScalars(
+            purpose = "all-chunk-ids (gom store)",
+            cypher = $$"""
+                MATCH (chunk:$($chunkLabel))
+                RETURN chunk.id AS id
+            """.trimIndent(),
+            type = String::class.java,
+            render = mapOf("chunkLabel" to properties.chunkNodeName),
+        )
+
+    private fun loadChunks(ids: List<String>): List<ChunkNode> =
+        gom.loadAll<ChunkNode> { where { query.id inList ids } }
 
     /** Embed and save one window, clearing the vector of any chunk that could not be embedded. */
     private fun embedWindow(window: List<ChunkNode>): EmbeddingBatchResult {
@@ -533,6 +550,25 @@ class GraphObjectManagerStore(
             else -> gom.loadAll<ContentElementNode>()
         }
         return nodes.map { it.toCoreType() }.filterIsInstance(clazz)
+    }
+
+    /**
+     * Count chunks in the database, with [filter] pushed into the query. The interface default counts
+     * [findAll], which for chunks is every stored vector and its text, filtered in memory — a document
+     * list showing a chunk total held the whole corpus on the heap to produce one number. Other types
+     * keep the default: there are few of them and they carry no vectors. A filter with no graph
+     * translation also falls back to it, rather than failing a count that works today.
+     */
+    override fun <C : ContentElement> count(clazz: Class<C>, filter: PropertyFilter?): Int {
+        if (clazz != Chunk::class.java) return super<EmbeddingAwareChunkingContentElementRepository>.count(clazz, filter)
+        return try {
+            gom.count(ChunkNode::class.java, ChunkNodeQueryDsl.INSTANCE) {
+                where { filter?.let { query.applyFilter(it) } }
+            }.toInt()
+        } catch (e: UnsupportedOperationException) {
+            logger.warn("count: no graph translation for {}; counting chunks in memory", filter, e)
+            super<EmbeddingAwareChunkingContentElementRepository>.count(clazz, filter)
+        }
     }
 
     /**

@@ -15,11 +15,12 @@
  */
 package com.embabel.agent.rag.graph
 
+import com.embabel.agent.filter.PropertyFilter
 import com.embabel.agent.rag.graph.model.ChunkNode
 import com.embabel.agent.rag.graph.test.DeterministicEmbeddingModel
 import com.embabel.agent.rag.ingestion.ChunkTransformer
 import com.embabel.agent.rag.ingestion.ContentChunker
-import com.embabel.agent.rag.store.EmbeddingIncompleteException
+import com.embabel.agent.rag.model.Chunk
 import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import org.drivine.autoconfigure.EnableDrivine
@@ -28,16 +29,11 @@ import org.drivine.manager.GraphObjectManager
 import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
-import org.drivine.manager.load
 import org.drivine.query.QuerySpecification
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -49,25 +45,13 @@ import org.springframework.context.annotation.Profile
 import org.springframework.test.context.ActiveProfiles
 import java.util.UUID
 
-private const val REJECTED_MARKER = "rejected-by-the-embedder"
-
 /**
- * A re-embed saves a chunk it could not embed with no vector. [ReembedSurvivesAFailedBatchTest] checks
- * what is passed to the object manager; this checks what the store holds afterwards, because Drivine's
- * default save skips null fields and would leave the previous model's vector in place.
+ * A filtered chunk count runs in the database. [ChunkCountStaysInTheDatabaseTest] checks that no chunk
+ * is loaded to count; this checks the database count gives the same answer the in-memory one did.
  */
-@SpringBootTest(classes = [Neo4jReembedClearsFailedVectorTest.Config::class])
+@SpringBootTest(classes = [Neo4jChunkCountTest.Config::class])
 @ActiveProfiles("neo4j")
-class Neo4jReembedClearsFailedVectorTest {
-
-    /** Rejects any call containing a text with [REJECTED_MARKER], as a model does with an oversized input. */
-    class Rejecting(private val delegate: EmbeddingService) : EmbeddingService by delegate {
-        override fun embed(text: String): FloatArray = embed(listOf(text)).single()
-        override fun embed(texts: List<String>): List<FloatArray> {
-            require(texts.none { REJECTED_MARKER in it }) { "input exceeds the model's token limit" }
-            return delegate.embed(texts)
-        }
-    }
+class Neo4jChunkCountTest {
 
     @Configuration
     @Profile("neo4j")
@@ -81,8 +65,7 @@ class Neo4jReembedClearsFailedVectorTest {
         @Bean
         fun graphObjectManager(factory: GraphObjectManagerFactory): GraphObjectManager = factory.get("graph")
         @Bean
-        fun embeddingService(): EmbeddingService =
-            Rejecting(SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel()))
+        fun embeddingService(): EmbeddingService = SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel())
 
         @Bean
         fun gomStore(
@@ -103,15 +86,12 @@ class Neo4jReembedClearsFailedVectorTest {
     @Autowired lateinit var store: GraphObjectManagerStore
     @Autowired @Qualifier("graph") lateinit var pm: PersistenceManager
     @Autowired lateinit var gom: GraphObjectManager
-    @Autowired lateinit var embeddingService: EmbeddingService
 
     private lateinit var prefix: String
-    private val goodId get() = "$prefix-good"
-    private val badId get() = "$prefix-bad"
 
     @BeforeEach
     fun setUp() {
-        prefix = "reembed-${UUID.randomUUID()}"
+        prefix = "count-${UUID.randomUUID()}"
         store.provision()
     }
 
@@ -124,36 +104,41 @@ class Neo4jReembedClearsFailedVectorTest {
         )
     }
 
-    /** A chunk carrying a vector from a previous model: every component 1. */
-    private fun seed(id: String, text: String) {
-        val stale = List(embeddingService.dimensions) { 1f }
-        gom.save(ChunkNode(id = id, text = text, urtext = text, parentId = "$prefix-parent", embedding = stale))
-        assertNotNull(gom.load<ChunkNode>(id)?.embedding, "precondition: stale vector persisted")
+    private fun seed(count: Int, context: String) = gom.saveAll(
+        (1..count).map { i ->
+            ChunkNode(
+                id = "$prefix-$context-$i",
+                text = "Text $i",
+                urtext = "Text $i",
+                parentId = "$prefix-parent",
+                embedding = List(4) { 1f },
+                freeFormMetadata = mapOf("context" to "$prefix-$context"),
+            )
+        },
+    )
+
+    @Test
+    fun `a chunk count filtered by context counts only that context`() {
+        seed(3, "mine")
+        seed(5, "theirs")
+
+        assertEquals(3, store.count(Chunk::class.java, PropertyFilter.Eq("context", "$prefix-mine")))
+        assertEquals(5, store.count(Chunk::class.java, PropertyFilter.Eq("context", "$prefix-theirs")))
+        assertEquals(0, store.count(Chunk::class.java, PropertyFilter.Eq("context", "$prefix-nobody")))
     }
 
     @Test
-    fun `a chunk that cannot be embedded is left with no vector, and the others get new ones`() {
-        seed(goodId, "graph databases and vector search")
-        seed(badId, "an oversized chunk $REJECTED_MARKER")
+    fun `a combined filter is applied in full`() {
+        seed(3, "mine")
+        seed(5, "theirs")
 
-        val e = assertThrows<EmbeddingIncompleteException> { store.reembedAll() }
+        val either = PropertyFilter.Or(
+            listOf(
+                PropertyFilter.Eq("context", "$prefix-mine"),
+                PropertyFilter.Eq("context", "$prefix-theirs"),
+            ),
+        )
 
-        assertTrue(badId in e.missingChunkIds)
-        assertTrue(gom.load<ChunkNode>(badId)?.embedding == null, "an old-model vector must not survive a failed re-embed")
-        val good = gom.load<ChunkNode>(goodId)?.embedding
-        assertNotNull(good)
-        assertNotEquals(List(embeddingService.dimensions) { 1f }, good, "the embedded chunk has a new vector")
-    }
-
-    @Test
-    fun `a re-embed that spans several windows reaches every chunk`() {
-        val ids = (1..600).map { "$prefix-many-$it" }
-        val stale = List(embeddingService.dimensions) { 1f }
-        gom.saveAll(ids.map { ChunkNode(id = it, text = "chunk $it", urtext = "chunk $it", parentId = "$prefix-parent", embedding = stale) })
-
-        store.reembedAll()
-
-        val restamped = ids.count { gom.load<ChunkNode>(it)?.embedding.let { v -> v != null && v != stale } }
-        assertEquals(ids.size, restamped, "every chunk, in every window, has a new vector")
+        assertEquals(8, store.count(Chunk::class.java, either))
     }
 }
