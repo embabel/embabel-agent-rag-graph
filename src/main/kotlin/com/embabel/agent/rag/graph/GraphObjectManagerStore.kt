@@ -25,6 +25,10 @@ import com.embabel.agent.rag.graph.fulltext.searchPreparedQuery
 import com.embabel.agent.rag.graph.fulltext.syntaxNotesFor
 import com.embabel.agent.rag.graph.model.ChunkExpandView
 import com.embabel.agent.rag.graph.model.ChunkNode
+import com.embabel.agent.rag.graph.model.ChunkPlaceFragment
+import com.embabel.agent.rag.graph.model.ContentElementFragment
+import com.embabel.agent.rag.graph.model.NextChunkLinkView
+import com.embabel.agent.rag.graph.model.ParentLinkView
 import com.embabel.agent.rag.graph.model.ContainerSectionNode
 import com.embabel.agent.rag.graph.model.ContentElementNode
 import com.embabel.agent.rag.graph.model.ContentElementRepositoryInfoImpl
@@ -103,9 +107,12 @@ private const val FULL_TEXT_SUPPRESSION_WARNING_THRESHOLD: Double = 0.5
  * Drivine predicates ([applyFilter]). Context expansion walks typed graph views — [ZoomOutView]
  * (`HAS_PARENT`) and [ChunkExpandView] (`NEXT_CHUNK`).
  *
- * Graph mutation (relationship creation, [deleteRootAndDescendants]) and multi-hop traversal
- * ([findChunksForEntity]) are expressed in Cypher through the [queryForRows] / [queryForInt] /
- * [executeCypher] helpers on [PersistenceManager].
+ * The hierarchy is written the same way: `HAS_PARENT` and `NEXT_CHUNK` edges by saving link views
+ * ([ParentLinkView], [NextChunkLinkView]), a section's place by saving the section.
+ *
+ * Three things are still Cypher, through the helpers on [PersistenceManager]: the delete cascade
+ * ([deleteRootAndDescendants]), the entity-to-chunk traversal ([findChunksForEntity]) and the scan
+ * of chunk ids a re-embed starts from.
  */
 class GraphObjectManagerStore(
     private val gom: GraphObjectManager,
@@ -650,28 +657,37 @@ class GraphObjectManagerStore(
     )
 
     override fun createInternalRelationships(root: NavigableDocument) {
-        // HAS_PARENT edges — the content hierarchy the recursive ContentTreeView walks.
-        provisioner.createHasParentEdges()
-        // NEXT_CHUNK edges between consecutive chunks within each container section (ordered by
-        // sequence_number) — the chain ChunkExpandView walks for sequence expansion. Scoped to the root
-        // being ingested (`root_document_id`) so ingesting N documents is O(chunks-per-doc), not a whole-
-        // graph rescan per document.
-        persistenceManager.executeCypher(
-            purpose = "Create NEXT_CHUNK relationships (gom store)",
-            cypher = $$"""
-                MATCH (c:$($chunkLabel))
-                WHERE c.root_document_id = $rootId
-                  AND c.container_section_id IS NOT NULL AND c.sequence_number IS NOT NULL
-                WITH c.container_section_id AS sec, c ORDER BY c.sequence_number
-                WITH sec, collect(c) AS chunks
-                UNWIND range(0, size(chunks) - 2) AS i
-                WITH chunks[i] AS a, chunks[i + 1] AS b
-                MERGE (a)-[:NEXT_CHUNK]->(b)
-            """.trimIndent(),
-            params = mapOf("rootId" to root.id),
-            render = mapOf("chunkLabel" to properties.chunkNodeName),
-        )
-        stampReadingOrder(root)
+        val sections = readingOrder(root, depth = 1)
+        val chunks = gom.loadAll<ChunkPlaceFragment> { where { query.rootDocumentId eq root.id } }
+        linkToParents(sections, chunks)
+        linkConsecutiveChunks(chunks)
+        stampReadingOrder(root, sections)
+    }
+
+    /**
+     * `HAS_PARENT` from every section and chunk of this document to what it sits inside — the
+     * hierarchy [ZoomOutView] and the recursive tree views walk. Only this document's elements, so
+     * ingesting one document costs its own size and not the graph's.
+     */
+    private fun linkToParents(sections: List<PlacedSection>, chunks: List<ChunkPlaceFragment>) {
+        val parentIds = sections.map { it.section.id to it.section.parentId } + chunks.map { it.id to it.parentId }
+        val links = parentIds.mapNotNull { (id, parentId) ->
+            parentId?.let { ParentLinkView(ContentElementFragment(id), ContentElementFragment(it)) }
+        }
+        gom.saveAll(links)
+    }
+
+    /**
+     * `NEXT_CHUNK` between consecutive chunks of each container section, in `sequence_number`
+     * order — the chain [ChunkExpandView] walks.
+     */
+    private fun linkConsecutiveChunks(chunks: List<ChunkPlaceFragment>) {
+        val links = chunks
+            .filter { it.containerSectionId != null && it.sequenceNumber != null }
+            .groupBy { it.containerSectionId }
+            .values
+            .flatMap { inSection -> inSection.sortedBy { it.sequenceNumber }.zipWithNext(::NextChunkLinkView) }
+        gom.saveAll(links)
     }
 
     /**
@@ -680,8 +696,7 @@ class GraphObjectManagerStore(
      * records either: `HAS_PARENT` says what a section belongs to, not where it comes, and a
      * chunk's `sequence_number` restarts in each container.
      */
-    private fun stampReadingOrder(root: NavigableDocument) {
-        val sections = readingOrder(root, depth = 1)
+    private fun stampReadingOrder(root: NavigableDocument, sections: List<PlacedSection>) {
         logger.debug("Stamping reading order on {} sections of '{}'", sections.size, root.uri)
         val placed = sections.mapIndexedNotNull { index, (section, depth) ->
             when (section) {
