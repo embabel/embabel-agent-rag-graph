@@ -16,6 +16,7 @@
 package com.embabel.agent.rag.graph.model
 
 import com.embabel.agent.rag.model.ContentElement
+import org.drivine.annotation.GraphProperty
 import org.drivine.annotation.NodeFragment
 import org.drivine.annotation.NodeId
 
@@ -35,6 +36,14 @@ sealed interface ContentElementNode {
      * narrow with `instanceOf<…>()`, rather than reaching for a subtype's DSL + the explicit form.
      */
     val uri: String?
+
+    /**
+     * The document this element belongs to, and — for a section — its place when that document is
+     * read top to bottom, counted from 0. Declared on the base so one query over the polymorphic
+     * base can take a document's sections in order; a chunk has no ordinal, a document has neither.
+     */
+    @GraphProperty("root_document_id") val rootDocumentId: String?
+    val ordinal: Long?
 
     fun toCoreType(): ContentElement
 }

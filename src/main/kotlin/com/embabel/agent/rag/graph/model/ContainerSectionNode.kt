@@ -17,6 +17,7 @@ package com.embabel.agent.rag.graph.model
 
 import com.embabel.agent.rag.model.ContainerSection
 import com.embabel.agent.rag.model.DefaultMaterializedContainerSection
+import org.drivine.annotation.GraphProperty
 import org.drivine.annotation.NodeFragment
 import org.drivine.annotation.NodeId
 import org.drivine.annotation.PropertyBag
@@ -35,12 +36,10 @@ data class ContainerSectionNode(
     val title: String,
     val parentId: String? = null,
     override val uri: String? = null,
-    /**
-     * Where this section falls when the document is read top to bottom, counted from 0 across the
-     * whole document. Stamped by the store once the tree is known, so a node built [from] a core
-     * section carries none — and a merge-patch save leaves the stored one alone.
-     */
-    val ordinal: Long? = null,
+    // Both stamped by the store once the whole tree is known, so a node built [from] a core section
+    // carries neither — and a merge-patch save leaves the stored ones alone.
+    @GraphProperty("root_document_id") override val rootDocumentId: String? = null,
+    override val ordinal: Long? = null,
     @PropertyBag(prefix = "metadata") val metadata: Map<String, Any?> = emptyMap(),
 ) : ContentElementNode {
 

@@ -33,6 +33,8 @@ data class DocumentNode(
     override val uri: String,
     val title: String,
     @GraphProperty("ingestionTimestamp") val ingestionTimestampMillis: Long? = null,
+    @GraphProperty("root_document_id") override val rootDocumentId: String? = null,
+    override val ordinal: Long? = null,
     @PropertyBag(prefix = "metadata") val metadata: Map<String, Any?> = emptyMap(),
 ) : ContentElementNode {
 

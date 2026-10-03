@@ -53,7 +53,7 @@ data class ChunkNode(
     val urtext: String,
     val parentId: String,
     override val uri: String? = null,
-    @GraphProperty("root_document_id") val rootDocumentId: String? = null,
+    @GraphProperty("root_document_id") override val rootDocumentId: String? = null,
     @GraphProperty("root_document_title") val rootDocumentTitle: String? = null,
     @GraphProperty("container_section_id") val containerSectionId: String? = null,
     @GraphProperty("container_section_title") val containerSectionTitle: String? = null,
@@ -64,6 +64,7 @@ data class ChunkNode(
     @GraphProperty("sequence_number") val sequenceNumber: Long? = null,
     @GraphProperty("chunk_index") val chunkIndex: Long? = null,
     @GraphProperty("total_chunks") val totalChunks: Long? = null,
+    override val ordinal: Long? = null,
     @VectorIndex(similarity = SimilarityFunction.COSINE) val embedding: List<Float>? = null,
     @PropertyBag(prefix = "metadata") val freeFormMetadata: Map<String, Any?> = emptyMap(),
 ) : ContentElementNode {

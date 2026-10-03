@@ -19,6 +19,7 @@ import org.drivine.manager.PersistenceManager
 import org.drivine.schema.EnsureResult
 import org.drivine.schema.FullTextIndexSpec
 import org.drivine.schema.IndexSpec
+import org.drivine.schema.RangeIndexSpec
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
 import org.slf4j.LoggerFactory
@@ -62,8 +63,9 @@ class GraphProvisioner(
         vectorIndexes: List<VectorIndexSpec>,
         fullTextIndexes: List<FullTextIndexSpec>,
         constraints: List<UniquenessConstraintSpec>,
+        rangeIndexes: List<RangeIndexSpec> = emptyList(),
     ) {
-        (vectorIndexes + fullTextIndexes).forEach { ensureUnderConventionName(it) }
+        (vectorIndexes + fullTextIndexes + rangeIndexes).forEach { ensureUnderConventionName(it) }
         constraints.forEach { persistenceManager.constraints.ensure(it) }
     }
 
