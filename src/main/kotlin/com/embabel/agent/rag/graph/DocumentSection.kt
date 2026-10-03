@@ -1,0 +1,32 @@
+/*
+ * Copyright 2024-2026 Embabel Pty Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.embabel.agent.rag.graph
+
+/**
+ * One section of a stored document, as [GraphObjectManagerStore.outline] lists it.
+ *
+ * @param depth 1 for a section directly under the document, 2 for one inside that, and so on.
+ * @param leaf whether the section holds text itself; a container holds only other sections.
+ * @param ordinal its place in reading order, counted from 0, or null for a document ingested
+ * before sections were numbered.
+ */
+data class DocumentSection(
+    val id: String,
+    val title: String,
+    val depth: Int,
+    val leaf: Boolean,
+    val ordinal: Int?,
+)

@@ -35,6 +35,12 @@ data class ContainerSectionNode(
     val title: String,
     val parentId: String? = null,
     override val uri: String? = null,
+    /**
+     * Where this section falls when the document is read top to bottom, counted from 0 across the
+     * whole document. Stamped by the store once the tree is known, so a node built [from] a core
+     * section carries none — and a merge-patch save leaves the stored one alone.
+     */
+    val ordinal: Long? = null,
     @PropertyBag(prefix = "metadata") val metadata: Map<String, Any?> = emptyMap(),
 ) : ContentElementNode {
 

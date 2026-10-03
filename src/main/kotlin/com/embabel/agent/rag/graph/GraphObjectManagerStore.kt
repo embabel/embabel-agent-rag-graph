@@ -49,6 +49,7 @@ import com.embabel.agent.rag.model.ContentRoot
 import com.embabel.agent.rag.model.LeafSection
 import com.embabel.agent.rag.model.MaterializedDocument
 import com.embabel.agent.rag.model.NavigableDocument
+import com.embabel.agent.rag.model.NavigableSection
 import com.embabel.agent.rag.model.Retrievable
 import com.embabel.agent.rag.service.RagRequest
 import com.embabel.agent.rag.service.support.FunctionRagFacet
@@ -663,7 +664,71 @@ class GraphObjectManagerStore(
             params = mapOf("rootId" to root.id),
             render = mapOf("chunkLabel" to properties.chunkNodeName),
         )
+        stampReadingOrder(root)
     }
+
+    /**
+     * Number every section of [root] in reading order — a section before the sections inside it,
+     * and those before its next sibling. Nothing else records it: `HAS_PARENT` says what a section
+     * belongs to, not where it comes, and a chunk's `sequence_number` restarts in each container.
+     */
+    private fun stampReadingOrder(root: NavigableDocument) {
+        val ids = readingOrder(root).map { it.id }
+        if (ids.isEmpty()) return
+        logger.debug("Stamping reading order on {} sections of '{}'", ids.size, root.uri)
+        // A list of ids, each numbered by its index: FalkorDB cannot parse a list of maps as a parameter.
+        persistenceManager.executeCypher(
+            purpose = "Stamp section reading order (gom store)",
+            cypher = $$"""
+                UNWIND range(0, size($ids) - 1) AS ordinal
+                MATCH (section:ContentElement {id: $ids[ordinal]})
+                SET section.ordinal = ordinal
+            """.trimIndent(),
+            params = mapOf("ids" to ids),
+        )
+    }
+
+    // NavigableContainerSection.descendants() yields a container's children before any grandchild,
+    // which is level order, not the order the document reads in.
+    private fun readingOrder(section: NavigableSection): List<NavigableSection> =
+        section.children.flatMap { listOf(it) + readingOrder(it) }
+
+    /**
+     * The sections of the document at [uri] in reading order: what a table of contents, or a reader
+     * paging through the document, walks. Empty when no such document is stored. A leaf's text is
+     * one [findById] away.
+     *
+     * A document ingested before sections were numbered has no order to return: its entries carry a
+     * null [DocumentSection.ordinal] and arrive in no particular order, until it is ingested again.
+     */
+    fun outline(uri: String): List<DocumentSection> =
+        persistenceManager.queryForRows(
+            purpose = "Document outline (gom store)",
+            cypher = $$"""
+                MATCH (root:ContentElement {uri: $uri})
+                WHERE 'Document' IN labels(root) OR 'ContentRoot' IN labels(root)
+                MATCH path = (section:ContentElement)-[:HAS_PARENT*1..]->(root)
+                WHERE 'LeafSection' IN labels(section) OR 'ContainerSection' IN labels(section)
+                WITH section, length(path) AS depth
+                ORDER BY section.ordinal
+                RETURN {
+                    id: section.id,
+                    title: section.title,
+                    depth: depth,
+                    leaf: 'LeafSection' IN labels(section),
+                    ordinal: section.ordinal
+                } AS row
+            """.trimIndent(),
+            params = mapOf("uri" to uri),
+        ).map { row ->
+            DocumentSection(
+                id = row["id"] as String,
+                title = row["title"] as? String ?: "",
+                depth = (row["depth"] as Number).toInt(),
+                leaf = row["leaf"] as Boolean,
+                ordinal = (row["ordinal"] as? Number)?.toInt(),
+            )
+        }
 
     // ----- ResultExpander: context expansion via edge traversal -----
 
