@@ -515,6 +515,7 @@ class FalkorDbIntegrationTest {
                 QuerySpecification
                     .withStatement(cypher)
                     .render(mapOf(
+                        "entityNodeName" to "Entity",
                         "relType" to "KNOWS",
                         "setClause" to setClause,
                     ))
@@ -553,6 +554,7 @@ class FalkorDbIntegrationTest {
             fun mergeSpec() = QuerySpecification
                 .withStatement(cypher)
                 .render(mapOf(
+                    "entityNodeName" to "Entity",
                     "relType" to "WORKS_WITH",
                     "setClause" to "",
                 ))

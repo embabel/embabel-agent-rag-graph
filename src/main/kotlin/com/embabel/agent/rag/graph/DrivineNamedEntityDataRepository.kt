@@ -203,6 +203,7 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
             QuerySpecification
                 .withStatement(statement)
                 .render(mapOf(
+                    "entityNodeName" to properties.entityNodeName,
                     "relType" to relationship.name,
                     "setClause" to setClause,
                 ))
@@ -232,6 +233,7 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
             QuerySpecification
                 .withStatement(statement)
                 .render(mapOf(
+                    "entityNodeName" to properties.entityNodeName,
                     "relType" to relationship.name,
                     "setClause" to setClause,
                 ))
