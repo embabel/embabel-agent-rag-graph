@@ -125,6 +125,7 @@ class Neo4jDocumentOutlineTest {
         assertEquals(listOf("intro", "a", "a1", "a2", "b").map { id(it) }, outline.map { it.id })
         assertEquals(listOf(0L, 1L, 2L, 3L, 4L), outline.map { it.ordinal })
         assertEquals(listOf("doc", "doc", "a", "a", "doc").map { id(it) }, outline.map { it.parentId })
+        assertEquals(listOf(1, 1, 2, 2, 1), outline.map { it.depth })
         assertEquals(listOf(true, false, true, true, true), outline.map { it.leaf })
     }
 

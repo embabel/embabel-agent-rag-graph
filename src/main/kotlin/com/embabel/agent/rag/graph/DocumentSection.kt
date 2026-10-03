@@ -19,6 +19,7 @@ package com.embabel.agent.rag.graph
  * One section of a stored document, as [GraphObjectManagerStore.outline] lists it.
  *
  * @param parentId the section, or the document, it sits directly inside.
+ * @param depth 1 for a section directly inside the document, 2 for one inside that, and so on.
  * @param leaf whether the section holds text itself; a container holds only other sections.
  * @param ordinal its place in reading order across the whole document, counted from 0.
  */
@@ -26,6 +27,7 @@ data class DocumentSection(
     val id: String,
     val title: String,
     val parentId: String?,
+    val depth: Int?,
     val leaf: Boolean,
     val ordinal: Long?,
 )

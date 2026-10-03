@@ -33,10 +33,11 @@ data class LeafSectionNode(
     val text: String,
     val parentId: String? = null,
     override val uri: String? = null,
-    // Both stamped by the store once the whole tree is known, so a node built [from] a core section
-    // carries neither — and a merge-patch save leaves the stored ones alone.
+    // All three stamped by the store once the whole tree is known, so a node built [from] a core section
+    // carries none of them — and a merge-patch save leaves the stored ones alone.
     @GraphProperty("root_document_id") override val rootDocumentId: String? = null,
     override val ordinal: Long? = null,
+    val depth: Long? = null,
     @PropertyBag(prefix = "metadata") val metadata: Map<String, Any?> = emptyMap(),
 ) : ContentElementNode {
 

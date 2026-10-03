@@ -29,7 +29,9 @@ import com.embabel.agent.rag.graph.model.ContainerSectionNode
 import com.embabel.agent.rag.graph.model.ContentElementNode
 import com.embabel.agent.rag.graph.model.ContentElementRepositoryInfoImpl
 import com.embabel.agent.rag.graph.model.DocumentNode
+import com.embabel.agent.rag.graph.model.LeafSectionHeading
 import com.embabel.agent.rag.graph.model.LeafSectionNode
+import com.embabel.agent.rag.graph.model.SectionHeadingNode
 import com.embabel.agent.rag.graph.model.ZoomOutView
 // Generated Drivine query DSL for the @NodeFragment models: the `loadAll` / `count` { where { } / depth() }
 // extensions, the `chunk` / `element` root accessors, and `ChunkNodeQueryDsl` for the filtered search forms.
@@ -679,12 +681,14 @@ class GraphObjectManagerStore(
      * chunk's `sequence_number` restarts in each container.
      */
     private fun stampReadingOrder(root: NavigableDocument) {
-        val sections = readingOrder(root)
+        val sections = readingOrder(root, depth = 1)
         logger.debug("Stamping reading order on {} sections of '{}'", sections.size, root.uri)
-        val placed = sections.mapIndexedNotNull { index, section ->
+        val placed = sections.mapIndexedNotNull { index, (section, depth) ->
             when (section) {
-                is LeafSection -> LeafSectionNode.from(section).copy(rootDocumentId = root.id, ordinal = index.toLong())
-                is ContainerSection -> ContainerSectionNode.from(section).copy(rootDocumentId = root.id, ordinal = index.toLong())
+                is LeafSection ->
+                    LeafSectionNode.from(section).copy(rootDocumentId = root.id, ordinal = index.toLong(), depth = depth)
+                is ContainerSection ->
+                    ContainerSectionNode.from(section).copy(rootDocumentId = root.id, ordinal = index.toLong(), depth = depth)
                 else -> null.also { logger.warn("No model for section {} ({}); it gets no place", section.id, section::class.simpleName) }
             }
         }
@@ -692,21 +696,23 @@ class GraphObjectManagerStore(
         gom.saveAll(placed.filterIsInstance<ContainerSectionNode>())
     }
 
+    private data class PlacedSection(val section: NavigableSection, val depth: Long)
+
     // NavigableContainerSection.descendants() yields a container's children before any grandchild,
     // which is level order, not the order the document reads in.
-    private fun readingOrder(section: NavigableSection): List<NavigableSection> =
-        section.children.flatMap { listOf(it) + readingOrder(it) }
+    private fun readingOrder(section: NavigableSection, depth: Long): List<PlacedSection> =
+        section.children.flatMap { listOf(PlacedSection(it, depth)) + readingOrder(it, depth + 1) }
 
     /**
      * The sections of the document at [uri] in reading order: what a table of contents, or a reader
      * paging through the document, walks. [skip] and [limit] take a window of it. Empty when no
-     * such document is stored. A leaf's text is one [findById] away.
+     * such document is stored. Headings only; a leaf's text is one [findById] away.
      *
      * A document ingested before sections were numbered lists nothing until it is ingested again.
      */
     fun outline(uri: String, skip: Int = 0, limit: Int? = null): List<DocumentSection> {
         val root = findContentRootByUri(uri) ?: return emptyList()
-        val sections = gom.loadAll<ContentElementNode> {
+        val headings = gom.loadAll<SectionHeadingNode> {
             where {
                 query.rootDocumentId eq root.id
                 query.ordinal.isNotNull()
@@ -720,12 +726,15 @@ class GraphObjectManagerStore(
             if (skip > 0) skip(skip)
             limit?.let { limit(it) }
         }
-        return sections.mapNotNull { section ->
-            when (section) {
-                is LeafSectionNode -> DocumentSection(section.id, section.title, section.parentId, leaf = true, ordinal = section.ordinal)
-                is ContainerSectionNode -> DocumentSection(section.id, section.title, section.parentId, leaf = false, ordinal = section.ordinal)
-                else -> null
-            }
+        return headings.map {
+            DocumentSection(
+                id = it.id,
+                title = it.title,
+                parentId = it.parentId,
+                depth = it.depth?.toInt(),
+                leaf = it is LeafSectionHeading,
+                ordinal = it.ordinal,
+            )
         }
     }
 
