@@ -25,13 +25,11 @@ import org.drivine.schema.VectorIndexSpec
 import org.slf4j.LoggerFactory
 
 /**
- * Graph-structure provisioning for [GraphObjectManagerStore] and the entity schema — the mechanics
- * they had duplicated: applying a schema through Drivine's index/constraint managers, and creating the
- * `HAS_PARENT` hierarchy edges.
+ * Schema provisioning for [GraphObjectManagerStore] and the entity schema — the mechanics they had
+ * duplicated: applying a schema through Drivine's index/constraint managers.
  *
  * A collaborator, not a base class: each store *owns* its schema (the spec lists differ — the GOM store
- * models no entities, so it provisions no entity indexes) and its chunk-sequence edges (per-`parentId`
- * `PART_OF`/`FIRST_CHUNK`/`NEXT_CHUNK` vs. a batch `NEXT_CHUNK`); only the common mechanics live here.
+ * models no entities, so it provisions no entity indexes); only the common mechanics live here.
  */
 class GraphProvisioner(
     private val persistenceManager: PersistenceManager,
@@ -87,21 +85,5 @@ class GraphProvisioner(
 
             else -> {} // Created / Recreated — nothing to decide
         }
-    }
-
-    /**
-     * Create the `HAS_PARENT` edges from each content element's `parentId` — the batch traversal both
-     * stores run to build the hierarchy the recursive content-tree views walk.
-     */
-    fun createHasParentEdges() {
-        persistenceManager.executeCypher(
-            purpose = "Create HAS_PARENT relationships",
-            cypher = """
-                MATCH (child:ContentElement) WHERE child.parentId IS NOT NULL
-                WITH child
-                MATCH (parent:ContentElement {id: child.parentId})
-                MERGE (child)-[:HAS_PARENT]->(parent)
-            """.trimIndent(),
-        )
     }
 }

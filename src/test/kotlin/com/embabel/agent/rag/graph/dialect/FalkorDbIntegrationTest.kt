@@ -338,24 +338,30 @@ class FalkorDbIntegrationTest {
         }
 
         @Test
-        fun `SET with map parameter fails on FalkorDB`() {
+        fun `SET with map parameter works on FalkorDB`() {
             val id = UUID.randomUUID().toString()
             testNodeIds.add(id)
-            // Map-typed parameters are not accepted by FalkorDB; the exact error
-            // message varies between versions, so we assert only that it throws.
-            org.junit.jupiter.api.assertThrows<Exception> {
-                persistenceManager.execute(
-                    QuerySpecification
-                        .withStatement(
-                            """MERGE (e:ContentElement {id: ${'$'}id})
-                               SET e += ${'$'}properties""".trimIndent()
-                        )
-                        .bind(mapOf(
-                            "id" to id,
-                            "properties" to mapOf("title" to "Test"),
-                        ))
-                )
-            }
+            // The FalkorDB client cannot carry a map as a parameter; Drivine writes it into the
+            // query as a literal, which is what lets a batched save run here.
+            persistenceManager.execute(
+                QuerySpecification
+                    .withStatement(
+                        """MERGE (e:ContentElement {id: ${'$'}id})
+                           SET e += ${'$'}properties""".trimIndent()
+                    )
+                    .bind(mapOf(
+                        "id" to id,
+                        "properties" to mapOf("title" to "Test"),
+                    ))
+            )
+
+            val title = persistenceManager.getOne(
+                QuerySpecification
+                    .withStatement("MATCH (e:ContentElement {id: ${'$'}id}) RETURN e.title")
+                    .bind(mapOf("id" to id))
+                    .transform(String::class.java)
+            )
+            assertEquals("Test", title)
         }
 
         @Test
