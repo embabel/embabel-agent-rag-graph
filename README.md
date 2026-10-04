@@ -128,6 +128,22 @@ ground truth, and is the place to re-measure if the corpus or index configuratio
 - The `vecf32()` wrapper is required around vector parameters in search queries (handled by the dialect).
 - Fulltext index creation supports one property at a time.
 
+## Working on the store: object manager first
+
+`GraphObjectManagerStore` reads and writes through Drivine's `GraphObjectManager`: `@NodeFragment`
+models, `@GraphView`s and the generated query DSL. Drivine writes the Cypher for the configured
+engine, so one model runs on Neo4j, FalkorDB and Memgraph. A hand-written statement runs wherever
+its author tried it.
+
+- Express a new read or write as a fragment, a view or a DSL query first.
+- Order by a property only with a range index that mirrors the ordering; Drivine warns when none does.
+- Write Cypher only when the object manager has no reasonable way to say it, for features or for
+  speed, and say why at the site.
+- When Drivine cannot express something, prefer adding it to Drivine.
+
+One site in the store is still Cypher: the entity-to-chunk lookup, because the entity label is
+configuration and a fragment's labels are fixed at compile time.
+
 ## Testing
 
 Integration tests use Testcontainers (Neo4j by default; FalkorDB and Memgraph are activated via the `falkordb` and `memgraph` Spring profiles):

@@ -31,6 +31,7 @@ import com.embabel.agent.rag.graph.model.NextChunkLinkView
 import com.embabel.agent.rag.graph.model.ParentLinkView
 import com.embabel.agent.rag.graph.model.ContainerSectionNode
 import com.embabel.agent.rag.graph.model.ContentElementNode
+import com.embabel.agent.rag.graph.model.ContentTreeView
 import com.embabel.agent.rag.graph.model.ContentElementRepositoryInfoImpl
 import com.embabel.agent.rag.graph.model.DocumentNode
 import com.embabel.agent.rag.graph.model.LeafSectionHeading
@@ -70,7 +71,9 @@ import com.embabel.agent.rag.store.EmbeddingIncompleteException
 import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
+import org.drivine.manager.CascadeType
 import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.delete
 import org.drivine.manager.NullPolicy
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.count
@@ -110,9 +113,17 @@ private const val FULL_TEXT_SUPPRESSION_WARNING_THRESHOLD: Double = 0.5
  * The hierarchy is written the same way: `HAS_PARENT` and `NEXT_CHUNK` edges by saving link views
  * ([ParentLinkView], [NextChunkLinkView]), a section's place by saving the section.
  *
- * Three things are still Cypher, through the helpers on [PersistenceManager]: the delete cascade
- * ([deleteRootAndDescendants]), the entity-to-chunk traversal ([findChunksForEntity]) and the scan
- * of chunk ids a re-embed starts from.
+ * A document is deleted the same way, as a cascade down [ContentTreeView].
+ *
+ * **Go through the object manager first.** It writes the Cypher for whichever engine is
+ * configured, so a read or write expressed as a fragment, a view or the query DSL runs on Neo4j,
+ * FalkorDB and Memgraph alike; a hand-written statement runs wherever its author tried it. Write
+ * Cypher here only when the object manager has no reasonable way to say it, for features or for
+ * speed, and say why at the site. When Drivine falls short, the better fix is usually in Drivine.
+ *
+ * One thing is still Cypher: the entity-to-chunk traversal ([findChunksForEntity]). The entity's
+ * label is configuration ([GraphRagServiceProperties.entityNodeName]) and a fragment's labels are
+ * fixed at compile time, so there is no fragment to hang the relationship on.
  */
 class GraphObjectManagerStore(
     private val gom: GraphObjectManager,
@@ -465,17 +476,9 @@ class GraphObjectManagerStore(
                 }
             }
 
-    /** Every chunk's id: a scalar each, so the whole list is small however large the store. */
+    /** Every chunk's id, read as [ChunkPlaceFragment]s: no text and no vector, so the list is small however large the store. */
     private fun allChunkIds(): List<String> =
-        persistenceManager.queryForScalars(
-            purpose = "all-chunk-ids (gom store)",
-            cypher = $$"""
-                MATCH (chunk:$($chunkLabel))
-                RETURN chunk.id AS id
-            """.trimIndent(),
-            type = String::class.java,
-            render = mapOf("chunkLabel" to properties.chunkNodeName),
-        )
+        gom.loadAll<ChunkPlaceFragment>().map { it.id }
 
     private fun loadChunks(ids: List<String>): List<ChunkNode> =
         gom.loadAll<ChunkNode> { where { query.id inList ids } }
@@ -610,23 +613,15 @@ class GraphObjectManagerStore(
             }
         }.firstOrNull()?.toCoreType() as? ContentRoot
 
-    // Root deletion is a HAS_PARENT cascade, expressed in Cypher.
+    /**
+     * Delete the document at [uri] and everything under it: a cascade down [ContentTreeView]'s
+     * `HAS_PARENT` children, done in the database. It follows the edges, not a property, so a
+     * document stored before sections named their document is removed whole as well.
+     */
     override fun deleteRootAndDescendants(uri: String): DocumentDeletionResult? {
-        val deletedCount = persistenceManager.queryForInt(
-            purpose = "Delete root and descendants (gom store)",
-            cypher = $$"""
-            MATCH (root:ContentElement {uri: $uri})
-            WHERE 'Document' IN labels(root) OR 'ContentRoot' IN labels(root)
-            OPTIONAL MATCH (root)<-[:HAS_PARENT*0..]-(descendant:ContentElement)
-            WITH collect(DISTINCT root) + collect(DISTINCT descendant) AS nodesToDelete
-            UNWIND nodesToDelete AS node
-            WITH DISTINCT node
-            DETACH DELETE node
-            RETURN count(*) AS deletedCount
-            """.trimIndent(),
-            params = mapOf("uri" to uri),
-        )
-        if (deletedCount == 0) return null
+        val root = findContentRootByUri(uri) ?: return null
+        val deletedCount = gom.delete<ContentTreeView>(root.id, CascadeType.DELETE_ALL)
+        logger.debug("Deleted {} content elements of '{}'", deletedCount, uri)
         return DocumentDeletionResult(rootUri = uri, deletedCount = deletedCount)
     }
 

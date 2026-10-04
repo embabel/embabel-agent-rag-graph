@@ -96,7 +96,7 @@ class Neo4jDocumentOutlineTest {
     @AfterEach
     fun cleanUp() {
         pm.execute(
-            QuerySpecification.withStatement("MATCH (n) WHERE n.id STARTS WITH \$p DETACH DELETE n").bind(mapOf("p" to prefix))
+            QuerySpecification.withStatement("MATCH (n) WHERE n.id STARTS WITH \$p OR n.root_document_id STARTS WITH \$p DETACH DELETE n").bind(mapOf("p" to prefix))
         )
     }
 
@@ -150,6 +150,36 @@ class Neo4jDocumentOutlineTest {
         val page = store.outline(root.uri, skip = 1, limit = 2)
 
         assertEquals(listOf("two", "three").map { id(it) }, page.map { it.id })
+    }
+
+    private fun stored(): Int = pm.query(
+        QuerySpecification
+            .withStatement("MATCH (n) WHERE n.id STARTS WITH \$p OR n.root_document_id STARTS WITH \$p RETURN count(n)")
+            .bind(mapOf("p" to prefix))
+            .transform(Int::class.java)
+    ).single()
+
+    @Test
+    fun `deleting a document removes its sections and chunks, and nothing else`() {
+        val a = DefaultMaterializedContainerSection(
+            id = id("a"), uri = null, title = "a", children = listOf(leaf("a1", "a"), leaf("a2", "a")),
+            parentId = id("doc"), metadata = emptyMap(),
+        )
+        val root = document(listOf(leaf("intro", "doc"), a))
+        store.writeAndChunkDocument(root)
+        val before = stored()
+        // Another document's section, which the delete must leave alone.
+        store.save(LeafSection(id = id("other"), uri = null, title = "other", text = "x", parentId = id("elsewhere"), metadata = emptyMap()))
+
+        val result = store.deleteRootAndDescendants(root.uri)
+
+        assertEquals(before, result?.deletedCount)
+        assertEquals(1, stored(), "only the other document's section is left")
+    }
+
+    @Test
+    fun `deleting a document that is not stored reports nothing`() {
+        assertEquals(null, store.deleteRootAndDescendants("test://$prefix-absent"))
     }
 
     @Test

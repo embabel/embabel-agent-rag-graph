@@ -1,0 +1,27 @@
+# Embabel RAG Graph
+
+> Graph-backed RAG for the Embabel Agent Framework: chunk, section and document storage with vector
+> and full-text search on Neo4j, FalkorDB and Memgraph, through Drivine.
+
+## Rules for changing this code
+
+- Go through Drivine's `GraphObjectManager` first: `@NodeFragment` models, `@GraphView`s and the
+  generated query DSL (`gom.loadAll`, `gom.saveAll`, `gom.delete`). Drivine writes the Cypher for the
+  configured engine, so the same model runs on Neo4j, FalkorDB and Memgraph.
+- Do not copy the hand-written Cypher that exists elsewhere in this repository as a pattern for
+  `GraphObjectManagerStore`. Write Cypher there only when the object manager has no reasonable way
+  to say it, for features or for speed, and say why at the site.
+- When Drivine cannot express something, prefer adding the feature to Drivine
+  (https://github.com/liberation-data/drivine4j) over working around it here.
+- Order by a property only with a range index that mirrors the ordering. Drivine's index advisor
+  warns when none does.
+- Put each `@NodeFragment` and `@GraphView` in its own file under `graph/model`.
+- A change must pass on all three engines. The cross-engine suite is
+  `AbstractRagSearchCharacterizationTest` and its Neo4j, FalkorDB and Memgraph subclasses.
+
+## Where things are
+
+- [README](README.md): overview, configuration, dialects and testing.
+- `src/main/kotlin/com/embabel/agent/rag/graph/GraphObjectManagerStore.kt`: the store.
+- `src/main/kotlin/com/embabel/agent/rag/graph/model/`: fragments and views.
+- `src/main/kotlin/com/embabel/agent/rag/graph/dialect/`: per-engine search dialects.

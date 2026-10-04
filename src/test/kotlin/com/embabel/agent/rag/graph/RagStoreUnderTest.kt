@@ -16,6 +16,7 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.agent.rag.model.Chunk
+import com.embabel.agent.rag.store.DocumentDeletionResult
 import com.embabel.agent.rag.model.ContentElement
 import com.embabel.agent.rag.model.NavigableDocument
 import com.embabel.agent.rag.service.ResultExpander
@@ -42,6 +43,8 @@ interface RagStoreUnderTest {
     fun textSearchChunks(query: String, topK: Int = 10): List<SimilarityResult<out Chunk>>
     fun vectorSearchChunks(query: String, topK: Int = 10): List<SimilarityResult<out Chunk>>
     fun reembedAll(): ReembedReport
+    fun outline(uri: String): List<DocumentSection>
+    fun deleteRootAndDescendants(uri: String): DocumentDeletionResult?
     fun expandResult(id: String, method: ResultExpander.Method, elementsToAdd: Int): List<ContentElement>
 }
 
@@ -57,6 +60,8 @@ class GomRagStoreAdapter(private val store: GraphObjectManagerStore) : RagStoreU
         store.vectorSearch(TextSimilaritySearchRequest(query, 0.0, topK), Chunk::class.java)
 
     override fun reembedAll(): ReembedReport = store.reembedAll()
+    override fun outline(uri: String): List<DocumentSection> = store.outline(uri)
+    override fun deleteRootAndDescendants(uri: String): DocumentDeletionResult? = store.deleteRootAndDescendants(uri)
 
     override fun expandResult(
         id: String,

@@ -16,6 +16,7 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.agent.rag.model.Chunk
+import com.embabel.agent.rag.model.DefaultMaterializedContainerSection
 import com.embabel.agent.rag.model.LeafSection
 import com.embabel.agent.rag.model.MaterializedDocument
 import com.embabel.agent.rag.service.ResultExpander
@@ -223,6 +224,53 @@ abstract class AbstractRagSearchCharacterizationTest {
             parents,
             "[$engineName] zooming out of a chunk returns the section it was cut from",
         )
+    }
+
+    /** A document with a section inside a section, ingested through the public path. */
+    private fun seedNestedDocument(): MaterializedDocument {
+        val ids = List(5) { UUID.randomUUID().toString() }
+        val (docId, introId, partId, firstId, secondId) = ids
+        fun leaf(id: String, title: String, parent: String) =
+            LeafSection(id = id, title = title, text = "$title has enough words to be a chunk of its own.", parentId = parent)
+        val part = DefaultMaterializedContainerSection(
+            id = partId,
+            title = "Part",
+            children = listOf(leaf(firstId, "First", partId), leaf(secondId, "Second", partId)),
+            parentId = docId,
+        )
+        val doc = MaterializedDocument(
+            id = docId,
+            uri = "test://characterization-${engineName.lowercase()}-$docId",
+            title = "Nested Document",
+            children = listOf(leaf(introId, "Intro", docId), part),
+        )
+        track(*ids.toTypedArray())
+        track(*store.writeAndChunkDocument(doc).toTypedArray())
+        return doc
+    }
+
+    @Test
+    fun `outline lists a document's sections in reading order`() {
+        val doc = seedNestedDocument()
+
+        val outline = store.outline(doc.uri)
+
+        assertEquals(listOf("Intro", "Part", "First", "Second"), outline.map { it.title }, "[$engineName] reading order")
+        assertEquals(listOf(1, 1, 2, 2), outline.map { it.depth }, "[$engineName] depth")
+        assertEquals(listOf(true, false, true, true), outline.map { it.leaf }, "[$engineName] leaf or container")
+    }
+
+    @Test
+    fun `deleting a document removes its sections and chunks`() {
+        val doc = seedNestedDocument()
+        val kept = seedDocument("Another document entirely, which the delete must leave alone.")
+
+        val result = store.deleteRootAndDescendants(doc.uri)
+
+        assertTrue((result?.deletedCount ?: 0) >= 5, "[$engineName] the document, its four sections and its chunks: $result")
+        assertTrue(store.outline(doc.uri).isEmpty(), "[$engineName] no sections left")
+        assertEquals(kept.map { it.id }, store.findAllChunksById(kept.map { it.id }).map { it.id }, "[$engineName] the other document is untouched")
+        assertEquals(null, store.deleteRootAndDescendants(doc.uri), "[$engineName] a second delete finds nothing")
     }
 
     @Test

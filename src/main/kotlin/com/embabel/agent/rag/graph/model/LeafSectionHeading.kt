@@ -19,17 +19,13 @@ import org.drivine.annotation.GraphProperty
 import org.drivine.annotation.NodeFragment
 import org.drivine.annotation.NodeId
 
-/**
- * A section as a table of contents needs it: where it is and what it is called, without the text
- * a [LeafSectionNode] carries. Loaded through this base, each section arrives as the heading of
- * its own kind, so leaf or container is the type and not a property.
- */
-@NodeFragment(labels = ["ContentElement"])
-sealed interface SectionHeadingNode {
-    @get:NodeId val id: String
-    val title: String
-    val parentId: String?
-    @GraphProperty("root_document_id") val rootDocumentId: String?
-    val ordinal: Long?
-    val depth: Long?
-}
+/** The heading of a section that holds text. */
+@NodeFragment(labels = ["LeafSection"])
+data class LeafSectionHeading(
+    @NodeId override val id: String,
+    override val title: String,
+    override val parentId: String? = null,
+    @GraphProperty("root_document_id") override val rootDocumentId: String? = null,
+    override val ordinal: Long? = null,
+    override val depth: Long? = null,
+) : SectionHeadingNode

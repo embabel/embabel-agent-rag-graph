@@ -16,6 +16,7 @@
 package com.embabel.agent.rag.graph
 
 import com.embabel.agent.rag.graph.model.ChunkNode
+import com.embabel.agent.rag.graph.model.ChunkPlaceFragment
 import com.embabel.agent.rag.graph.model.ChunkNodeQueryDsl
 import com.embabel.agent.rag.ingestion.ChunkTransformer
 import com.embabel.agent.rag.ingestion.ContentChunker
@@ -79,7 +80,7 @@ class ReembedSurvivesAFailedBatchTest {
 
     private fun store(embedding: EmbeddingService, nodes: List<ChunkNode>): GraphObjectManagerStore {
         // The ids are listed first, then served a window at a time, as the store loads them.
-        every { persistence.query(any<QuerySpecification<Any>>()) } returns nodes.map { it.id }
+        every { gom.loadAll(ChunkPlaceFragment::class.java) } returns nodes.map { ChunkPlaceFragment(it.id) }
         every { gom.loadAll(ChunkNode::class.java, any<ChunkNodeQueryDsl>(), any()) } returnsMany nodes.chunked(256)
         every { gom.saveAll(any<List<ChunkNode>>(), any(), any()) } answers {
             val nodes = firstArg<List<ChunkNode>>()
