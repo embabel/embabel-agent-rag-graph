@@ -695,6 +695,14 @@ class GraphObjectManagerStore(
      * and those before its next sibling — and say which document it belongs to. Nothing else
      * records either: `HAS_PARENT` says what a section belongs to, not where it comes, and a
      * chunk's `sequence_number` restarts in each container.
+     *
+     * TODO(https://github.com/embabel/embabel-agent/issues/2110): this is every section's SECOND
+     * save. `writeAndChunkDocument` is final in embabel-agent and has already called [save] on each
+     * section, one at a time and with no position, before it hands the tree to
+     * [createInternalRelationships]. The cost is one extra write per section at ingest; nothing is
+     * wrong in what is stored. When embabel-agent lets a store save a document's structure in one
+     * step, save the sections ONCE there, with their place, and delete this function along with
+     * the per-section branches of [save] it makes redundant.
      */
     private fun stampReadingOrder(root: NavigableDocument, sections: List<PlacedSection>) {
         logger.debug("Stamping reading order on {} sections of '{}'", sections.size, root.uri)
