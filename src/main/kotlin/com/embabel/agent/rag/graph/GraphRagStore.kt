@@ -49,7 +49,19 @@ interface GraphRagStore :
      * embedded. The indexes are rebuilt and the other chunks saved first, and calling this again is a
      * safe retry.
      */
-    fun reembedAll(): ReembedReport
+    /** Re-embed everything this store holds with the current model, saying nothing of how far it has got. */
+    fun reembedAll(): ReembedReport = reembedAll { _, _ -> }
+
+    /**
+     * Re-embed everything this store holds with the current model, and say how far it has got.
+     *
+     * [onProgress] is called with how many chunks have been gone through and how many there are:
+     * once before the first with `(0, total)`, then as the work advances, ending on
+     * `(total, total)`. A re-embed is minutes of work on a large store, and a caller with nothing
+     * to show for it cannot tell working from stuck. "Gone through" counts a chunk that was
+     * skipped or could not be embedded too: it is how far along the walk is, not how many succeeded.
+     */
+    fun reembedAll(onProgress: (done: Int, total: Int) -> Unit): ReembedReport
 
     /**
      * The sections of the document at [uri] in reading order: what a table of contents, or a reader

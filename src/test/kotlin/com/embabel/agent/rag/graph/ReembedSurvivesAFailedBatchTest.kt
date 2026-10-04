@@ -99,6 +99,26 @@ class ReembedSurvivesAFailedBatchTest {
     }
 
     @Test
+    fun `a re-embed says how far it has got, a window at a time`() {
+        val store = store(Rejecting(emptySet()), chunks(600))
+        val said = mutableListOf<String>()
+
+        store.reembedAll { done, total -> said += "$done of $total" }
+
+        assertEquals(listOf("0 of 600", "256 of 600", "512 of 600", "600 of 600"), said)
+    }
+
+    @Test
+    fun `a chunk that could not be embedded still counts as gone through`() {
+        val store = store(Rejecting(setOf("Text 3")), chunks(8))
+        val said = mutableListOf<String>()
+
+        runCatching { store.reembedAll { done, total -> said += "$done of $total" } }
+
+        assertEquals(listOf("0 of 8", "8 of 8"), said)
+    }
+
+    @Test
     fun `a chunk that cannot be embedded fails the re-embed after the index is rebuilt`() {
         val store = store(Rejecting(setOf("Text 3")), chunks(8))
 
