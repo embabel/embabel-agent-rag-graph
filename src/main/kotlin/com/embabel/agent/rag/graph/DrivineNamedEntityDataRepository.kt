@@ -78,6 +78,11 @@ import org.drivine.query.QuerySpecification
  *        live database, and for callers that manage the entity schema themselves. (The name predates
  *        the behaviour — it verified once; renaming it would break named-argument callers.)
  */
+@Deprecated(
+    message = "Hand-written Cypher that searches on Neo4j only. Use GraphObjectManagerEntityRepository, " +
+        "which stores entities the same way and runs on every engine. To be removed in a later release.",
+    replaceWith = ReplaceWith("GraphObjectManagerEntityRepository"),
+)
 data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
     private val persistenceManager: PersistenceManager,
     private val properties: GraphRagServiceProperties,
