@@ -17,7 +17,6 @@ package com.embabel.agent.rag.graph
 
 import com.embabel.agent.filter.PropertyFilter
 import com.embabel.agent.rag.filter.EntityFilter
-import com.embabel.agent.rag.graph.dialect.RagDialect
 import com.embabel.agent.rag.graph.fulltext.FULL_TEXT_SIMILARITY_FLOOR
 import com.embabel.agent.rag.graph.fulltext.CompositeRequiredTermExtractor
 import com.embabel.agent.rag.graph.fulltext.RequiredTermExtractor
@@ -89,11 +88,17 @@ import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
 
+/**
+ * The `k` in `score / (score + k)`, the saturation that maps a raw BM25 score onto `[0, 1)`: a raw
+ * score equal to `k` lands on 0.5. Used here only to explain a threshold, not to compute a score.
+ */
+private const val FULL_TEXT_BM25_K: Double = 3.0
+
 /** Window size for [GraphObjectManagerStore.reembedAll] — bounds heap and per-request embedding size. */
 private const val REEMBED_BATCH_SIZE = 256
 
 /**
- * A threshold above this requires a raw full-text score above [RagDialect.DEFAULT_BM25_K] — already
+ * A threshold above this requires a raw full-text score above [FULL_TEXT_BM25_K] — already
  * a strong match. Empty results above it are far more likely a mis-set threshold than an empty corpus.
  */
 private const val FULL_TEXT_SUPPRESSION_WARNING_THRESHOLD: Double = 0.5
@@ -364,7 +369,7 @@ class GraphObjectManagerStore(
     /**
      * Explain an empty full-text result set that the caller's threshold most likely caused.
      *
-     * Full-text scores are normalized in the dialect Cypher as `score/(score + [RagDialect.bm25K])`.
+     * Full-text scores are normalized as `score/(score + [FULL_TEXT_BM25_K])`.
      * A caller carrying a cosine-calibrated threshold ([RagRequest] defaults to 0.8) now filters
      * everything out where it previously filtered nothing — say so rather than returning a silent
      * empty list.
@@ -381,7 +386,7 @@ class GraphObjectManagerStore(
                 demands a very strong raw match — thresholds calibrated for cosine similarity do not
                 transfer. Lower or omit the threshold and let topK rank.
                 """.trimIndent(),
-                query, threshold, RagDialect.DEFAULT_BM25_K,
+                query, threshold, FULL_TEXT_BM25_K,
             )
         }
     }

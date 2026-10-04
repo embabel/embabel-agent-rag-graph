@@ -21,7 +21,6 @@
 
 ## Where things are
 
-- [README](README.md): overview, configuration, dialects and testing.
+- [README](README.md): overview, configuration and testing.
 - `src/main/kotlin/com/embabel/agent/rag/graph/GraphObjectManagerStore.kt`: the store.
 - `src/main/kotlin/com/embabel/agent/rag/graph/model/`: fragments and views.
-- `src/main/kotlin/com/embabel/agent/rag/graph/dialect/`: per-engine search dialects.

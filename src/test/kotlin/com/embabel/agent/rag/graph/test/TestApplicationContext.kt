@@ -19,7 +19,6 @@ import com.embabel.agent.rag.ingestion.ChunkTransformer
 import com.embabel.agent.rag.ingestion.ContentChunker
 import com.embabel.agent.rag.graph.GraphObjectManagerStore
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
-import com.embabel.agent.rag.graph.dialect.Neo4jRagDialect
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import com.embabel.common.util.generateRandomFloatArray
 import org.drivine.autoconfigure.EnableDrivine

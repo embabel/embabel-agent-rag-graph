@@ -116,7 +116,7 @@ ground truth, and is the place to re-measure if the corpus or index configuratio
 ### FalkorDB Notes
 
 - Unique constraints require the Redis command `GRAPH.CONSTRAINT CREATE`, which must be issued through the FalkorDB driver directly (not via Cypher).
-- The `vecf32()` wrapper is required around vector parameters in search queries (handled by the dialect).
+- The `vecf32()` wrapper is required around vector parameters in search queries (handled by Drivine).
 - Fulltext index creation supports one property at a time.
 
 ## Working on the store: object manager first
