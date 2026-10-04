@@ -726,14 +726,7 @@ class GraphObjectManagerStore(
     private fun readingOrder(section: NavigableSection, depth: Long): List<PlacedSection> =
         section.children.flatMap { listOf(PlacedSection(it, depth)) + readingOrder(it, depth + 1) }
 
-    /**
-     * The sections of the document at [uri] in reading order: what a table of contents, or a reader
-     * paging through the document, walks. [skip] and [limit] take a window of it. Empty when no
-     * such document is stored. Headings only; a leaf's text is one [findById] away.
-     *
-     * A document ingested before sections were numbered lists nothing until it is ingested again.
-     */
-    fun outline(uri: String, skip: Int = 0, limit: Int? = null): List<DocumentSection> {
+    override fun outline(uri: String, skip: Int, limit: Int?): List<DocumentSection> {
         val root = findContentRootByUri(uri) ?: return emptyList()
         val headings = gom.loadAll<SectionHeadingNode> {
             where {

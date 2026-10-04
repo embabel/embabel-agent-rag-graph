@@ -31,8 +31,8 @@ import com.embabel.agent.rag.store.ChunkingContentElementRepository
  * [CoreSearchOperations] + [FilteringVectorSearch] + [FilteringTextSearch] + [ResultExpander] +
  * [RagFacetProvider]), plus the store-level [reembedAll].
  *
- * Both [DrivineStore] and [GraphObjectManagerStore] implement it, so a consumer injects `GraphRagStore`
- * and the concrete implementation is a `@Primary` bean swap — the A/B toggle.
+ * [GraphObjectManagerStore] implements it; a consumer injects `GraphRagStore` and never binds to
+ * the implementation.
  */
 interface GraphRagStore :
     ChunkingContentElementRepository,
@@ -50,4 +50,12 @@ interface GraphRagStore :
      * safe retry.
      */
     fun reembedAll(): ReembedReport
+
+    /**
+     * The sections of the document at [uri] in reading order: what a table of contents, or a reader
+     * paging through the document, walks. [skip] and [limit] take a window of it. Empty when no
+     * such document is stored, and for a document ingested before sections were numbered.
+     * Headings only; a leaf's text is one [findById] away.
+     */
+    fun outline(uri: String, skip: Int = 0, limit: Int? = null): List<DocumentSection>
 }
