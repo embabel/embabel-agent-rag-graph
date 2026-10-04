@@ -15,6 +15,7 @@
  */
 package com.embabel.agent.rag.graph
 
+import com.embabel.agent.rag.model.Chunk
 import com.embabel.agent.rag.service.CoreSearchOperations
 import com.embabel.agent.rag.service.FilteringTextSearch
 import com.embabel.agent.rag.service.FilteringVectorSearch
@@ -70,4 +71,17 @@ interface GraphRagStore :
      * Headings only; a leaf's text is one [findById] away.
      */
     fun outline(uri: String, skip: Int = 0, limit: Int? = null): List<DocumentSection>
+
+    /**
+     * The chunks cut from the section [sectionId], in the order they were cut: what search matches
+     * against when it finds that section.
+     *
+     * A section long enough to be chunked alone has chunks that name it. Short sections are
+     * chunked TOGETHER, and such a chunk names only what holds them: the section they sit in, or
+     * the document itself when the whole of it is one chunk. So asked for a short leaf this returns
+     * nothing, and asked for what holds it, the chunk they share; a caller after a short leaf's
+     * chunk asks for the leaf, then for what it sits in, and so on up to the document's id.
+     * Empty when [sectionId] names nothing with chunks of either kind.
+     */
+    fun chunksOf(sectionId: String): List<Chunk>
 }
