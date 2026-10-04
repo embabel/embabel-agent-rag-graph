@@ -20,11 +20,9 @@ import org.drivine.query.QuerySpecification
 import org.slf4j.LoggerFactory
 
 /**
- * The purpose-logged, parameterized inline-Cypher helpers the [GraphObjectManagerStore] and
- * [GraphProvisioner] need for the handful of things Drivine's object API can't express (mutation /
- * multi-hop traversal) — hoisted straight onto [PersistenceManager] so they don't have to depend on the
- * broad [CypherSearch] surface. Inline Cypher only (no resource-name resolution — that's [CypherSearch]'s
- * job for [DrivineStore]).
+ * Purpose-logged, parameterized inline-Cypher helpers on [PersistenceManager], for the few things
+ * [GraphObjectManagerStore] cannot yet say through Drivine's object API. Reach for the object manager
+ * first; see the store's class comment.
  */
 private val cypherOpsLogger = LoggerFactory.getLogger("com.embabel.agent.rag.graph.CypherOps")
 

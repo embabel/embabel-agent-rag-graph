@@ -4,15 +4,14 @@ RAG (Retrieval-Augmented Generation) implementation for graph databases using Dr
 
 ## Overview
 
-This module provides a graph-database-backed implementation of the RAG pattern using Drivine4j. It supports **Neo4j**, **FalkorDB**, and **Memgraph** through a dialect abstraction that handles the Cypher differences between engines.
+This module provides a graph-database-backed implementation of the RAG pattern using Drivine4j. It supports **Neo4j**, **FalkorDB**, and **Memgraph** through Drivine, which writes the Cypher for the configured engine.
 
 ### Key Components
 
-- **DrivineStore**: Content element repository for storing and retrieving documents, chunks, and embeddings
-- **RagDialect**: Strategy interface for database-specific operations (index creation, vector search, fulltext search, embedding storage)
-- **CypherSearch / DrivineCypherSearch**: Cypher query execution layer
-- **LogicalQueryResolver**: Resolves logical query names to Cypher query files
-- **Mappers**: Row mappers for converting query results to domain objects
+- **GraphObjectManagerStore**: content repository for documents, sections, chunks and embeddings, with vector and full-text search, through Drivine's `GraphObjectManager`
+- **DrivineNamedEntityDataRepository**: storage and search for named entities and their relationships
+- **LogicalQueryResolver**: resolves logical query names to Cypher query files
+- **CypherQueryTools**: LLM-facing tools that run validated, read-only Cypher
 
 ### Supported Databases
 
@@ -40,34 +39,26 @@ Add this dependency to your project:
 <dependency>
     <groupId>com.embabel.agent</groupId>
     <artifactId>embabel-agent-rag-graph</artifactId>
-    <version>0.2.0-SNAPSHOT</version>
+    <version>0.5.0-SNAPSHOT</version>
 </dependency>
 ```
 
-### Selecting a Dialect
-
-The dialect is resolved from Drivine's `DatabaseType`:
+### Creating the store
 
 ```kotlin
-import com.embabel.agent.rag.graph.dialect.RagDialect
-import org.drivine.connection.DatabaseType
-
-val dialect = RagDialect.forDatabaseType(DatabaseType.FALKORDB)
-```
-
-Pass it when constructing `DrivineStore`:
-
-```kotlin
-DrivineStore(
+val store: GraphRagStore = GraphObjectManagerStore(
+    gom = graphObjectManagerFactory.get("graph"),
     persistenceManager = persistenceManager,
-    properties = properties,
-    cypherSearch = cypherSearch,
-    dialect = dialect,
-    // ...
+    properties = properties,            // GraphRagServiceProperties
+    chunkerConfig = ContentChunker.Config(),
+    chunkTransformer = ChunkTransformer.NO_OP,
+    embeddingService = embeddingService,
 )
+store.provision()                       // indexes and constraints, idempotent
 ```
 
-If no dialect is specified, `Neo4jRagDialect` is used by default.
+The engine is whichever Drivine datasource the managers are bound to; Drivine writes the Cypher for
+it, so nothing engine-specific is passed in.
 
 ## Configuration
 

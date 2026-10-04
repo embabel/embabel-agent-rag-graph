@@ -20,7 +20,6 @@ import com.embabel.agent.rag.ingestion.ContentChunker
 import com.embabel.agent.rag.model.Chunk
 import com.embabel.agent.rag.model.DefaultMaterializedContainerSection
 import com.embabel.agent.rag.model.MaterializedDocument
-import com.embabel.agent.rag.graph.DrivineCypherSearch
 import com.embabel.agent.rag.graph.GraphObjectManagerStore
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
 import com.embabel.agent.rag.graph.test.FakeEmbeddingModel
@@ -101,11 +100,6 @@ class MemgraphIngestionTest {
         @Bean("graph")
         fun persistenceManager(factory: PersistenceManagerFactory): PersistenceManager {
             return factory.get("graph")
-        }
-
-        @Bean
-        fun drivineCypherSearch(persistenceManager: PersistenceManager): DrivineCypherSearch {
-            return DrivineCypherSearch(persistenceManager)
         }
 
         @Bean

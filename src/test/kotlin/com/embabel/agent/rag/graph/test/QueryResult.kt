@@ -13,10 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.embabel.agent.rag.graph
+package com.embabel.agent.rag.graph.test
 
 /**
- * Portable Query result abstraction.
+ * The rows a shell query returned.
  * Provides access to result rows as a list of maps.
  */
 class QueryResult(

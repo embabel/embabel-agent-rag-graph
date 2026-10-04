@@ -15,7 +15,6 @@
  */
 package com.embabel.agent.rag.graph.test
 
-import com.embabel.agent.rag.graph.CypherSearch
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
 import org.springframework.shell.standard.ShellComponent
 import org.springframework.shell.standard.ShellMethod
@@ -26,7 +25,7 @@ import org.springframework.shell.standard.ShellOption
  */
 @ShellComponent
 class RagShellCommands(
-    private val cypherSearch: CypherSearch,
+    private val cypherSearch: ShellCypher,
     private val properties: GraphRagServiceProperties,
     private val fakeUser: FakeUser,
 ) {

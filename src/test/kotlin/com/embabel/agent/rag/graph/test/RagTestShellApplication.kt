@@ -35,7 +35,7 @@ import org.springframework.scheduling.annotation.EnableScheduling
  * Spring Shell application for testing RAG functionality interactively.
  *
  * This is a cut-down version of the Guide application for debugging and testing
- * the RAG/DrivineCypherSearch functionality.
+ * the RAG store.
  *
  * Run this app to get an interactive shell where you can:
  * - Execute RAG searches against a pre-seeded Neo4j database

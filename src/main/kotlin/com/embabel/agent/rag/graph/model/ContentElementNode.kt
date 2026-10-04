@@ -23,8 +23,7 @@ import org.drivine.annotation.NodeId
 /**
  * Polymorphic base for the persisted content-element models. The shared `ContentElement` label lives
  * here and is inherited by each subtype's own label(s) at save time; on load, Drivine dispatches by
- * the node's label set to the right concrete model (retiring the hand-rolled
- * `DefaultContentElementRowMapper` label chain). Each subtype knows how to rebuild its own core type.
+ * the node's label set to the right concrete model. Each subtype knows how to rebuild its own core type.
  */
 @NodeFragment(labels = ["ContentElement"])
 sealed interface ContentElementNode {
