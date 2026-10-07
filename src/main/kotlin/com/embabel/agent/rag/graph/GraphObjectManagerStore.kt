@@ -207,6 +207,12 @@ class GraphObjectManagerStore(
     // Mirrors outline's `where` and `orderBy`, so a document's sections are read off the index in order.
     private val sectionOrderIndex = RangeIndexSpec("ContentElement", listOf("root_document_id", "ordinal"))
 
+    // What chunksOf looks a section's chunks up by: the leaf they were cut from, or the section holding them.
+    private val chunkSectionIndexes = listOf(
+        RangeIndexSpec(properties.chunkNodeName, listOf("leaf_section_id")),
+        RangeIndexSpec(properties.chunkNodeName, listOf("container_section_id")),
+    )
+
     private val provisioner = GraphProvisioner(persistenceManager)
 
     override fun provision() {
@@ -215,7 +221,7 @@ class GraphObjectManagerStore(
             vectorIndexes = listOf(chunkVectorIndex),
             fullTextIndexes = listOf(chunkFullTextIndex),
             constraints = listOf(UniquenessConstraintSpec(properties.entityNodeName, "id")),
-            rangeIndexes = listOf(sectionOrderIndex),
+            rangeIndexes = listOf(sectionOrderIndex) + chunkSectionIndexes,
         )
         logger.info("Provisioning complete")
     }
@@ -758,6 +764,21 @@ class GraphObjectManagerStore(
                 ordinal = it.ordinal,
             )
         }
+    }
+
+    override fun chunksOf(sectionId: String): List<Chunk> {
+        val cutFromIt = gom.loadAll<ChunkPlaceFragment> { where { query.leafSectionId eq sectionId } }
+        // Chunks of several short sections together name no leaf, only the section that holds them.
+        val sharedInIt = gom.loadAll<ChunkPlaceFragment> {
+            where {
+                query.containerSectionId eq sectionId
+                query.leafSectionId.isNull()
+            }
+        }
+        // Found by where they sit, which is light; then loaded whole, in the order they were cut.
+        val inOrder = (cutFromIt + sharedInIt).sortedBy { it.sequenceNumber ?: 0L }.map { it.id }
+        val chunks = findAllChunksById(inOrder).associateBy { it.id }
+        return inOrder.mapNotNull(chunks::get)
     }
 
     // ----- ResultExpander: context expansion via edge traversal -----

@@ -32,6 +32,7 @@ import org.drivine.manager.PersistenceManagerFactory
 import org.drivine.query.QuerySpecification
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -150,6 +151,23 @@ class Neo4jDocumentOutlineTest {
         val page = store.outline(root.uri, skip = 1, limit = 2)
 
         assertEquals(listOf("two", "three").map { id(it) }, page.map { it.id })
+    }
+
+    @Test
+    fun `a section long enough to be chunked alone is found by its own chunks, in the order they were cut`() {
+        val sentence = "The quick brown fox jumps over the lazy dog near the riverbank at dawn. "
+        val long = LeafSection(
+            id = id("long"), uri = null, title = "long", text = sentence.repeat(60), parentId = id("doc"), metadata = emptyMap(),
+        )
+        val root = document(listOf(long, leaf("short", "doc")))
+        store.writeAndChunkDocument(root)
+
+        val chunks = store.chunksOf(id("long"))
+
+        assertTrue(chunks.size > 1, "4,000 characters is more than one chunk: ${chunks.size}")
+        assertEquals(chunks.map { it.structure.sequenceNumber }.sortedBy { it ?: 0 }, chunks.map { it.structure.sequenceNumber })
+        assertTrue(chunks.all { it.structure.leafSectionId == id("long") })
+        assertEquals(emptyList<String>(), store.chunksOf(id("nowhere")).map { it.id })
     }
 
     private fun stored(): Int = pm.query(

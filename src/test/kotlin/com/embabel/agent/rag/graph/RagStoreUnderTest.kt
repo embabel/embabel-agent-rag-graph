@@ -44,6 +44,7 @@ interface RagStoreUnderTest {
     fun vectorSearchChunks(query: String, topK: Int = 10): List<SimilarityResult<out Chunk>>
     fun reembedAll(): ReembedReport
     fun outline(uri: String): List<DocumentSection>
+    fun chunksOf(sectionId: String): List<Chunk>
     fun deleteRootAndDescendants(uri: String): DocumentDeletionResult?
     fun expandResult(id: String, method: ResultExpander.Method, elementsToAdd: Int): List<ContentElement>
 }
@@ -61,6 +62,7 @@ class GomRagStoreAdapter(private val store: GraphObjectManagerStore) : RagStoreU
 
     override fun reembedAll(): ReembedReport = store.reembedAll()
     override fun outline(uri: String): List<DocumentSection> = store.outline(uri)
+    override fun chunksOf(sectionId: String): List<Chunk> = store.chunksOf(sectionId)
     override fun deleteRootAndDescendants(uri: String): DocumentDeletionResult? = store.deleteRootAndDescendants(uri)
 
     override fun expandResult(

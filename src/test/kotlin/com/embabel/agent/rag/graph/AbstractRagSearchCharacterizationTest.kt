@@ -261,6 +261,25 @@ abstract class AbstractRagSearchCharacterizationTest {
     }
 
     @Test
+    fun `short sections are chunked together, and that chunk is found by what holds them`() {
+        val doc = seedNestedDocument()
+        val outline = store.outline(doc.uri)
+        // Whichever holds the chunk: the section the short ones sit in, or the document itself
+        // when the whole of it is short enough to be one chunk.
+        val holders = listOf(outline.single { it.title == "Part" }.id, doc.id)
+
+        val shared = holders.flatMap { store.chunksOf(it) }
+
+        assertTrue(shared.isNotEmpty(), "[$engineName] no chunk found under $holders")
+        val text = shared.joinToString("\n") { it.text }
+        assertTrue(text.contains("First has enough words"), "[$engineName] $text")
+        assertTrue(text.contains("Second has enough words"), "[$engineName] $text")
+        assertTrue(shared.all { it.structure.leafSectionId == null }, "[$engineName] a shared chunk names no leaf")
+        val first = outline.single { it.title == "First" }
+        assertTrue(store.chunksOf(first.id).isEmpty(), "[$engineName] no chunk is First's alone")
+    }
+
+    @Test
     fun `deleting a document removes its sections and chunks`() {
         val doc = seedNestedDocument()
         val kept = seedDocument("Another document entirely, which the delete must leave alone.")

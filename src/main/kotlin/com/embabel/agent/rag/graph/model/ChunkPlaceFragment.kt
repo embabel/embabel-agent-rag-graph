@@ -29,5 +29,6 @@ data class ChunkPlaceFragment(
     val parentId: String? = null,
     @GraphProperty("root_document_id") val rootDocumentId: String? = null,
     @GraphProperty("container_section_id") val containerSectionId: String? = null,
+    @GraphProperty("leaf_section_id") val leafSectionId: String? = null,
     @GraphProperty("sequence_number") val sequenceNumber: Long? = null,
 )
