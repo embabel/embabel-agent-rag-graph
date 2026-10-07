@@ -40,7 +40,6 @@ embabel:
         content-element-full-text-index: embabel_content_fulltext_index
         entity-full-text-index: embabel_entity_fulltext_index
         chunk-node-name: Chunk
-        entity-node-name: Entity
         max-chunk-size: 1500
         overlap-size: 200
   models:

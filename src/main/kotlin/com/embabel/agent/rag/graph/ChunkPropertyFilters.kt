@@ -17,8 +17,8 @@ package com.embabel.agent.rag.graph
 
 import com.embabel.agent.filter.PropertyFilter
 import com.embabel.agent.rag.filter.EntityFilter
-import com.embabel.agent.rag.graph.model.ChunkNodeQueryDsl
 import org.drivine.query.dsl.ComparisonOperator
+import org.drivine.query.dsl.ResolvableNodeReference
 import org.drivine.query.dsl.WhereBuilder
 import org.drivine.query.dsl.anyOf
 import org.drivine.query.dsl.hasAnyLabel
@@ -27,7 +27,7 @@ import org.drivine.query.dsl.predicateOn
 
 /** Apply the optional metadata + entity filters into the enclosing `where { }` (both `AND`-ed; null = no predicate). */
 context(_: WhereBuilder<*>)
-fun ChunkNodeQueryDsl.applyFilters(metadataFilter: PropertyFilter?, entityFilter: EntityFilter?) {
+fun ResolvableNodeReference.applyFilters(metadataFilter: PropertyFilter?, entityFilter: EntityFilter?) {
     metadataFilter?.let { applyFilter(it) }
     entityFilter?.let { applyFilter(it) }
 }
@@ -38,13 +38,13 @@ fun ChunkNodeQueryDsl.applyFilters(metadataFilter: PropertyFilter?, entityFilter
  * object manager instead of hand-written filter Cypher. Values bind as `$param_*` (no injection).
  *
  * `predicateOn(key, …)` is Drivine's model-aware resolver (0.0.70): it maps a filter key to its stored
- * path from `ChunkNode`'s own `@GraphProperty` / `@PropertyBag` annotations — a promoted structural key
- * to its flat on-disk name, everything else to the `metadata.` bag — so this translator no longer needs
- * to know the model's structure. `And` is the implicit conjunction of a `where` block; `Or` / `Not` map
+ * path from the fragment's own `@GraphProperty` / `@PropertyBag` annotations — on a chunk, a promoted
+ * structural key to its flat on-disk name and everything else to the `metadata.` bag; on an entity,
+ * whose bag is flat, a key to itself — so this translator does not need to know the model's structure. `And` is the implicit conjunction of a `where` block; `Or` / `Not` map
  * to Drivine's [anyOf] / [not].
  */
 context(_: WhereBuilder<*>)
-fun ChunkNodeQueryDsl.applyFilter(filter: PropertyFilter) {
+fun ResolvableNodeReference.applyFilter(filter: PropertyFilter) {
     when (filter) {
         is PropertyFilter.Eq -> predicateOn(filter.key, ComparisonOperator.EQUALS, filter.value)
         is PropertyFilter.Ne -> predicateOn(filter.key, ComparisonOperator.NOT_EQUALS, filter.value)
@@ -69,7 +69,7 @@ fun ChunkNodeQueryDsl.applyFilter(filter: PropertyFilter) {
         // element. HAS_ELEMENT is the dynamic-key twin of the typed `hasItem` infix.
         is PropertyFilter.HasElement -> predicateOn(filter.key, ComparisonOperator.HAS_ELEMENT, filter.value)
         else -> throw UnsupportedOperationException(
-            "GraphObjectManagerStore cannot translate ${filter::class.simpleName} to a graph query filter",
+            "${filter::class.simpleName} cannot be translated to a graph query filter",
         )
     }
 }
