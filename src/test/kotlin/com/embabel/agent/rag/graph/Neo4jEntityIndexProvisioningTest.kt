@@ -232,6 +232,53 @@ class Neo4jEntityIndexProvisioningTest {
         )
     }
 
+    private fun entityIndexWidth(): Int = pm.getOne(
+        QuerySpecification
+            .withStatement(
+                """
+                SHOW VECTOR INDEXES YIELD name, options WHERE name = ${'$'}name
+                RETURN toInteger(options.indexConfig['vector.dimensions'])
+                """.trimIndent(),
+            )
+            .bind(mapOf("name" to properties.entityIndex))
+            .transform(Int::class.java),
+    )
+
+    /**
+     * What switching the embedding model does to a running deployment: the same provisioner, asked
+     * again under a model of another width. Without a rebuild the index keeps the first width, and
+     * the engine refuses every query vector the new model produces.
+     */
+    @Test
+    fun `an index built for one model is rebuilt when the model changes width`() {
+        var model: EmbeddingModel = DeterministicEmbeddingModel(dimensions = 384)
+        val provisioner = EntitySchemaProvisioner(pm, properties, { SpringAiEmbeddingService("fake", "embabel", model) })
+
+        provisioner.ensureOnce()
+        assertEquals(384, entityIndexWidth())
+
+        model = DeterministicEmbeddingModel(dimensions = 1024)
+        provisioner.ensureOnce()
+
+        assertEquals(1024, entityIndexWidth(), "the index follows the model")
+    }
+
+    @Test
+    fun `an index already at the model's width is left alone, however often it is asked`() {
+        val provisioner = EntitySchemaProvisioner(
+            pm, properties, { SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel(dimensions = 384)) },
+        )
+        provisioner.ensureOnce()
+        val built = indexFingerprints()
+
+        provisioner.ensureOnce()
+        EntitySchemaProvisioner(
+            pm, properties, { SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel(dimensions = 384)) },
+        ).ensureOnce()
+
+        assertEquals(built, indexFingerprints(), "nothing was dropped or rebuilt")
+    }
+
     private fun newRepository(
         model: EmbeddingModel = DeterministicEmbeddingModel(),
         verifyIndexes: Boolean = true,

@@ -429,11 +429,11 @@ class GraphObjectManagerStore(
      * @throws EmbeddingIncompleteException after the index is rebuilt, if some chunks could not be
      * embedded. The others are saved. Calling this again re-embeds every chunk, so it is a safe retry.
      */
-    override fun reembedAll(): ReembedReport {
+    override fun reembedAll(onProgress: (done: Int, total: Int) -> Unit): ReembedReport {
         logger.info("reembedAll (gom store) start. model={} dim={}", embeddingService.name, embeddingService.dimensions)
         persistenceManager.indexes.drop(chunkVectorIndex)
         val outcome = try {
-            reembedEveryChunk()
+            reembedEveryChunk(onProgress)
         } finally {
             provision()
         }
@@ -458,28 +458,34 @@ class GraphObjectManagerStore(
      * rather than a window of calls each time. A probe that succeeds resumes normal re-embedding, so a
      * run of chunks the model always rejects stops only its own window rather than every window after it.
      */
-    private fun reembedEveryChunk(): ReembedOutcome =
-        allChunkIds().chunked(REEMBED_BATCH_SIZE).asSequence()
-            .map { ids -> loadChunks(ids).filter { it.text.isNotBlank() } }
-            .filter { it.isNotEmpty() }
-            .fold(ReembedOutcome()) { outcome, window ->
-                when {
-                    outcome.windowsToSkip > 0 -> {
-                        clearEmbeddings(window)
-                        outcome.skipped(window.map { it.id })
-                    }
-                    outcome.suspect -> {
-                        val failure = probe(window.first())
-                        if (failure == null) {
-                            outcome.plus(embedWindow(window))
-                        } else {
-                            clearEmbeddings(window)
-                            outcome.probeFailed(window.map { it.id }, failure)
-                        }
-                    }
-                    else -> outcome.plus(embedWindow(window))
-                }
+    private fun reembedEveryChunk(onProgress: (done: Int, total: Int) -> Unit): ReembedOutcome {
+        val ids = allChunkIds()
+        onProgress(0, ids.size)
+        return ids.chunked(REEMBED_BATCH_SIZE).asSequence()
+            .fold(ReembedOutcome() to 0) { (outcome, walked), window ->
+                reembedWindow(outcome, loadChunks(window).filter { it.text.isNotBlank() })
+                    .also { onProgress(walked + window.size, ids.size) } to walked + window.size
+            }.first
+    }
+
+    /** One window of the walk: embedded, or cleared and counted as missing when the model is failing. */
+    private fun reembedWindow(outcome: ReembedOutcome, window: List<ChunkNode>): ReembedOutcome = when {
+        window.isEmpty() -> outcome
+        outcome.windowsToSkip > 0 -> {
+            clearEmbeddings(window)
+            outcome.skipped(window.map { it.id })
+        }
+        outcome.suspect -> {
+            val failure = probe(window.first())
+            if (failure == null) {
+                outcome.plus(embedWindow(window))
+            } else {
+                clearEmbeddings(window)
+                outcome.probeFailed(window.map { it.id }, failure)
             }
+        }
+        else -> outcome.plus(embedWindow(window))
+    }
 
     /** Every chunk's id, read as [ChunkPlaceFragment]s: no text and no vector, so the list is small however large the store. */
     private fun allChunkIds(): List<String> =

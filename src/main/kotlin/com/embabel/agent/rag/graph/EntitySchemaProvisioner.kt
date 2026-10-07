@@ -22,7 +22,7 @@ import org.drivine.schema.FullTextIndexSpec
 import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.VectorIndexSpec
 import org.slf4j.LoggerFactory
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Ensures the two entity indexes [DrivineNamedEntityDataRepository] binds **by name** —
@@ -70,12 +70,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * (`supportsSchemaManagement`), not inferred from the engine's name: capability belongs to the
  * grammar, and an engine this class has never heard of may resolve a perfectly capable one.
  *
- * ## Still open: a model that CHANGES
+ * ## A model that changes
  *
- * The marker answers "is there a model yet", not "is it still the same one". A real model later
- * swapped for one of a different width lands in the same drift the placeholder protects against.
- * The fix is a schema version keyed to the embedding model's identity, so a change rebuilds the
- * index rather than drifting (Drivine's `SchemaCatalog.withVersion`).
+ * The vector index declares a width, and a model swapped at runtime for one of another width leaves
+ * an index nothing can be searched with: the engine refuses a query vector that is not the index's
+ * width. So what is remembered is the WIDTH the indexes were ensured at, not merely that they were.
+ * A search under a model of another width ensures again, and an index found at the old width is
+ * rebuilt at the new one. Whatever vectors it held were the old model's, and are no more searchable
+ * by the new model in the old index than in none.
  *
  * @param enabled false disables all schema work, including the engine check — for tests with no live
  *        database, and for callers that manage the entity schema themselves.
@@ -91,7 +93,8 @@ class EntitySchemaProvisioner(
 
     private val provisioner = GraphProvisioner(persistenceManager)
 
-    private val ensured = AtomicBoolean(false)
+    /** The embedding width the indexes were last ensured at, or null when they have not been. */
+    private val ensuredAt = AtomicReference<Int?>(null)
 
     init {
         if (enabled && !persistenceManager.supportsSchemaManagement) {
@@ -107,14 +110,15 @@ class EntitySchemaProvisioner(
     /**
      * Create the entity indexes if they are absent, idempotently — [GraphProvisioner.ensureSchema]
      * matches an existing index by `(label, properties)`, so a database already carrying them is left
-     * alone. Cheap to call on every search: once an attempt succeeds this returns on an atomic read.
+     * alone. Cheap to call on every search: once an attempt succeeds this asks the model its width,
+     * compares it with the one remembered, and returns.
      *
      * Not fatal: a read-only database, a driver that cannot answer yet, or a user without schema
      * privileges all leave the application able to serve everything that is not entity search. A
      * failed attempt leaves the flag unset, so the next search tries again.
      */
     fun ensureOnce() {
-        if (!enabled || ensured.get()) return
+        if (!enabled) return
         val embeddings = embeddingService()
         if (embeddings.awaitingProviderKey) {
             // No model yet, so no dimension anyone can vouch for. Skipping is the recoverable
@@ -126,10 +130,12 @@ class EntitySchemaProvisioner(
             return
         }
         try {
+            val width = embeddings.dimensions
+            if (ensuredAt.get() == width) return
             provisioner.ensureSchema(
                 vectorIndexes = listOf(
                     VectorIndexSpec(
-                        properties.entityNodeName, "embedding", embeddings.dimensions,
+                        properties.entityNodeName, "embedding", width,
                         SimilarityFunction.COSINE, properties.entityIndex,
                     ),
                 ),
@@ -140,8 +146,10 @@ class EntitySchemaProvisioner(
                     ),
                 ),
                 constraints = emptyList(),
+                // The entity index follows the model: see "A model that changes" above.
+                rebuildAtAnotherWidth = true,
             )
-            ensured.set(true)
+            ensuredAt.set(width)
         } catch (e: Exception) {
             logger.warn(
                 "Could not ensure entity indexes {} and {}: {}. Entity search will fail until they " +
@@ -150,5 +158,4 @@ class EntitySchemaProvisioner(
             )
         }
     }
-
 }

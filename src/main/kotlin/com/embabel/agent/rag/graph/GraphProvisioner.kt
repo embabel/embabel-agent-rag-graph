@@ -56,18 +56,27 @@ class GraphProvisioner(
      * a configured `contentElementIndex`) — each flip rebuilds it, with degraded vector
      * recall until it completes. The chunk full-text index name *is* aligned across both stores, so it is
      * not rebuilt on a flip; aligning the vector index name too would make the A/B switch seamless.
+     *
+     * [rebuildAtAnotherWidth] rebuilds a vector index that stands at a width other than the one
+     * asked for. Off by default: rebuilding drops what the index held, which for chunks is every
+     * vector until they are embedded again, and a store that changes model does that itself.
      */
     fun ensureSchema(
         vectorIndexes: List<VectorIndexSpec>,
         fullTextIndexes: List<FullTextIndexSpec>,
         constraints: List<UniquenessConstraintSpec>,
         rangeIndexes: List<RangeIndexSpec> = emptyList(),
+        rebuildAtAnotherWidth: Boolean = false,
     ) {
-        (vectorIndexes + fullTextIndexes + rangeIndexes).forEach { ensureUnderConventionName(it) }
+        (vectorIndexes + fullTextIndexes + rangeIndexes).forEach { ensureUnderConventionName(it, rebuildAtAnotherWidth) }
         constraints.forEach { persistenceManager.constraints.ensure(it) }
     }
 
-    private fun ensureUnderConventionName(spec: IndexSpec) {
+    /** A vector index standing at a width other than the one asked for: the one drift that makes it unusable. */
+    private fun widthDiffers(drift: EnsureResult.Drift, spec: IndexSpec): Boolean =
+        spec is VectorIndexSpec && drift.existing.dimensions != null && drift.existing.dimensions != spec.dimensions
+
+    private fun ensureUnderConventionName(spec: IndexSpec, rebuildAtAnotherWidth: Boolean) {
         when (val result = persistenceManager.indexes.ensure(spec)) {
             is EnsureResult.AlreadyMatching ->
                 if (result.info.name != spec.effectiveName) {
@@ -78,10 +87,19 @@ class GraphProvisioner(
                     persistenceManager.indexes.recreate(spec)
                 }
 
-            is EnsureResult.Drift -> logger.warn(
-                "Index shape drift on {}{}: existing {} vs requested {}; leaving in place (recreate() would rebuild, destructive)",
-                spec.label, spec.properties, result.existing, spec,
-            )
+            is EnsureResult.Drift ->
+                if (rebuildAtAnotherWidth && widthDiffers(result, spec)) {
+                    logger.info(
+                        "Vector index on {}{} is {} wide and {} is asked for — rebuilding it at the new width",
+                        spec.label, spec.properties, result.existing.dimensions, (spec as VectorIndexSpec).dimensions,
+                    )
+                    persistenceManager.indexes.recreate(spec)
+                } else {
+                    logger.warn(
+                        "Index shape drift on {}{}: existing {} vs requested {}; leaving in place (recreate() would rebuild, destructive)",
+                        spec.label, spec.properties, result.existing, spec,
+                    )
+                }
 
             else -> {} // Created / Recreated — nothing to decide
         }
