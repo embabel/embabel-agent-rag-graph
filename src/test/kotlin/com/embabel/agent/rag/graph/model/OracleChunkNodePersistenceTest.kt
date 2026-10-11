@@ -34,28 +34,17 @@ import org.springframework.context.annotation.EnableAspectJAutoProxy
 import org.springframework.context.annotation.Primary
 import org.springframework.context.annotation.Profile
 import org.springframework.test.context.ActiveProfiles
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
-import org.testcontainers.utility.DockerImageName
+import org.drivine.test.OracleCypherFixtures
+import org.drivine.test.OracleTestContainer
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 
-@SpringBootTest(classes = [MemgraphChunkNodePersistenceTest.Config::class])
-@Testcontainers
-@ActiveProfiles("memgraph")
-class MemgraphChunkNodePersistenceTest : AbstractChunkNodePersistenceTest() {
-
-    companion object {
-        @Container
-        @JvmStatic
-        val memgraph: GenericContainer<*> = GenericContainer(
-            DockerImageName.parse("memgraph/memgraph-mage:latest")
-        )
-            .withExposedPorts(7687)
-            .withCommand("--also-log-to-stderr", "--log-level=WARNING")
-    }
+@SpringBootTest(classes = [OracleChunkNodePersistenceTest.Config::class])
+@EnabledIfEnvironmentVariable(named = "ORACLE_TESTS", matches = "true")
+@ActiveProfiles("oracle")
+class OracleChunkNodePersistenceTest : AbstractChunkNodePersistenceTest() {
 
     @Configuration
-    @Profile("memgraph")
+    @Profile("oracle")
     @EnableDrivine
     @EnableAspectJAutoProxy(proxyTargetClass = true)
     @EnableConfigurationProperties(GraphRagServiceProperties::class)
@@ -65,12 +54,12 @@ class MemgraphChunkNodePersistenceTest : AbstractChunkNodePersistenceTest() {
         fun dataSourceMap(): DataSourceMap = DataSourceMap(
             mapOf(
                 "graph" to ConnectionProperties(
-                    host = memgraph.host,
-                    port = memgraph.getMappedPort(7687),
-                    userName = "",
-                    password = "",
-                    type = DatabaseType.MEMGRAPH,
-                    databaseName = "memgraph",
+                    host = OracleTestContainer.getConnectionHost(),
+                    port = OracleTestContainer.getConnectionPort(),
+                    userName = OracleTestContainer.getConnectionUsername(),
+                    password = OracleTestContainer.getConnectionPassword(),
+                    type = DatabaseType.ORACLE,
+                    databaseName = OracleTestContainer.SERVICE,
                 )
             )
         )
@@ -87,7 +76,10 @@ class MemgraphChunkNodePersistenceTest : AbstractChunkNodePersistenceTest() {
 
     @Autowired
     @Qualifier("graph")
-    override lateinit var persistenceManager: PersistenceManager
+    lateinit var oracle: PersistenceManager
 
-    override val engineName = "Memgraph"
+    // The contract's fixtures are Cypher, which Oracle does not speak: they are worked out over the graph.
+    override val persistenceManager: PersistenceManager by lazy { OracleCypherFixtures.over(oracle) }
+
+    override val engineName = "Oracle"
 }

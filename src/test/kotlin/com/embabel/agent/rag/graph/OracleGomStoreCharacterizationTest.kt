@@ -20,7 +20,9 @@ import com.embabel.agent.rag.ingestion.ChunkTransformer
 import com.embabel.agent.rag.ingestion.ContentChunker
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import org.drivine.autoconfigure.EnableDrivine
-import org.drivine.autoconfigure.EnableDrivineTestConfig
+import org.drivine.connection.ConnectionProperties
+import org.drivine.connection.DataSourceMap
+import org.drivine.connection.DatabaseType
 import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
@@ -31,20 +33,39 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.EnableAspectJAutoProxy
+import org.springframework.context.annotation.Primary
 import org.springframework.context.annotation.Profile
 import org.springframework.test.context.ActiveProfiles
+import org.drivine.test.OracleCypherFixtures
+import org.drivine.test.OracleTestContainer
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 
-@SpringBootTest(classes = [FalkorDbGomStoreCharacterizationTest.Config::class])
-@ActiveProfiles("falkordb")
-class FalkorDbGomStoreCharacterizationTest : AbstractRagSearchCharacterizationTest() {
+@SpringBootTest(classes = [OracleGomStoreCharacterizationTest.Config::class])
+@EnabledIfEnvironmentVariable(named = "ORACLE_TESTS", matches = "true")
+@ActiveProfiles("oracle")
+class OracleGomStoreCharacterizationTest : AbstractRagSearchCharacterizationTest() {
 
     @Configuration
-    @Profile("falkordb")
+    @Profile("oracle")
     @EnableDrivine
-    @EnableDrivineTestConfig
     @EnableAspectJAutoProxy(proxyTargetClass = true)
     @EnableConfigurationProperties(GraphRagServiceProperties::class)
     class Config {
+        @Bean
+        @Primary
+        fun dataSourceMap(): DataSourceMap = DataSourceMap(
+            mapOf(
+                "graph" to ConnectionProperties(
+                    host = OracleTestContainer.getConnectionHost(),
+                    port = OracleTestContainer.getConnectionPort(),
+                    userName = OracleTestContainer.getConnectionUsername(),
+                    password = OracleTestContainer.getConnectionPassword(),
+                    type = DatabaseType.ORACLE,
+                    databaseName = OracleTestContainer.SERVICE,
+                )
+            )
+        )
+
         @Bean("graph")
         fun persistenceManager(factory: PersistenceManagerFactory): PersistenceManager = factory.get("graph")
 
@@ -68,9 +89,13 @@ class FalkorDbGomStoreCharacterizationTest : AbstractRagSearchCharacterizationTe
 
     @Autowired
     @Qualifier("graph")
-    override lateinit var persistenceManager: PersistenceManager
+    lateinit var oracle: PersistenceManager
+
+    // The contract's fixtures are Cypher, which Oracle does not speak: they are worked out over the graph.
+    override val persistenceManager: PersistenceManager by lazy { OracleCypherFixtures.over(oracle) }
 
     override val store: RagStoreUnderTest get() = GomRagStoreAdapter(gomStore)
 
-    override val engineName = "FalkorDB"
+    override val engineName = "Oracle"
+
 }

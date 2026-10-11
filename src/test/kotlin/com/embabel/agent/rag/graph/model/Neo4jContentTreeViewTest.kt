@@ -18,7 +18,7 @@ package com.embabel.agent.rag.graph.model
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.autoconfigure.EnableDrivineTestConfig
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
@@ -42,7 +42,7 @@ import java.util.UUID
  * Spike / capability tests for the graph-traversal views: the recursive `HAS_PARENT` tree, its
  * polymorphic typed form, and the one-hop `zoomOut`.
  *
- * Each test uses a **fresh id prefix** and cleans up by prefix — a reused [GraphObjectManager] snapshots
+ * Each test uses a **fresh id prefix** and cleans up by prefix — a reused [StatelessGraphObjectManager] snapshots
  * saved/loaded objects, so recreating a deleted id in a later test would hit a stale session snapshot
  * ("skip the write" / missing fields). Unique ids per test avoid the delete-then-recreate entirely.
  */
@@ -61,11 +61,11 @@ class Neo4jContentTreeViewTest {
         fun persistenceManager(factory: PersistenceManagerFactory): PersistenceManager = factory.get("graph")
 
         @Bean
-        fun graphObjectManager(factory: GraphObjectManagerFactory): GraphObjectManager = factory.get("graph")
+        fun graphObjectManager(factory: GraphObjectManagerFactory): StatelessGraphObjectManager = factory.stateless("graph")
     }
 
     @Autowired
-    lateinit var gom: GraphObjectManager
+    lateinit var gom: StatelessGraphObjectManager
 
     @Autowired
     @Qualifier("graph")

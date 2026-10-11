@@ -76,13 +76,13 @@ class Neo4jEntityRepositoriesShareDataTest {
             properties = properties,
             dataDictionary = dictionary,
             embeddingService = embeddings,
-            graphObjectManager = factory.get("graph"),
+            graphObjectManager = factory.stateless("graph"),
         )
     }
 
     private val objectManager: NamedEntityDataRepository by lazy {
         GraphObjectManagerEntityRepository(
-            gom = factory.get("graph"),
+            gom = factory.stateless("graph"),
             properties = properties,
             dataDictionary = dictionary,
             embeddingService = embeddings,

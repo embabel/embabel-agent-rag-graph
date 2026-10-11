@@ -19,7 +19,7 @@
 
     <properties>
         <embabel-agent.version>1.5.3</embabel-agent.version>
-        <drivine.version>0.0.91</drivine.version>
+        <drivine.version>0.1.0-oracle-SNAPSHOT</drivine.version>
         <!-- Overrides the parent's default: the Drivine KSP-generated DSL uses context parameters
              (Kotlin 2.2+), so this module and its codegen-gradle build compile with 2.3.21. -->
         <kotlin.version>2.3.21</kotlin.version>
@@ -119,6 +119,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- The Oracle tests (ORACLE_TESTS=true). An application on Oracle adds the driver itself. -->
+        <dependency>
+            <groupId>com.oracle.database.jdbc</groupId>
+            <artifactId>ojdbc11</artifactId>
             <scope>test</scope>
         </dependency>
 

@@ -13,14 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.embabel.agent.rag.graph.model
+package com.embabel.agent.rag.graph
 
-import com.embabel.agent.rag.graph.GraphRagServiceProperties
+import com.embabel.agent.rag.graph.test.DeterministicEmbeddingModel
+import com.embabel.agent.rag.service.NamedEntityDataRepository
+import com.embabel.common.ai.model.SpringAiEmbeddingService
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.connection.ConnectionProperties
 import org.drivine.connection.DataSourceMap
 import org.drivine.connection.DatabaseType
-import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
@@ -34,28 +35,18 @@ import org.springframework.context.annotation.EnableAspectJAutoProxy
 import org.springframework.context.annotation.Primary
 import org.springframework.context.annotation.Profile
 import org.springframework.test.context.ActiveProfiles
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
-import org.testcontainers.utility.DockerImageName
+import org.drivine.test.OracleCypherFixtures
+import org.drivine.test.OracleTestContainer
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 
-@SpringBootTest(classes = [MemgraphChunkNodePersistenceTest.Config::class])
-@Testcontainers
-@ActiveProfiles("memgraph")
-class MemgraphChunkNodePersistenceTest : AbstractChunkNodePersistenceTest() {
-
-    companion object {
-        @Container
-        @JvmStatic
-        val memgraph: GenericContainer<*> = GenericContainer(
-            DockerImageName.parse("memgraph/memgraph-mage:latest")
-        )
-            .withExposedPorts(7687)
-            .withCommand("--also-log-to-stderr", "--log-level=WARNING")
-    }
+/** The entity contract, held against [GraphObjectManagerEntityRepository] on Oracle. */
+@SpringBootTest(classes = [OracleObjectManagerEntityRepositoryContractTest.Config::class])
+@EnabledIfEnvironmentVariable(named = "ORACLE_TESTS", matches = "true")
+@ActiveProfiles("oracle")
+class OracleObjectManagerEntityRepositoryContractTest : AbstractNamedEntityRepositoryContractTest() {
 
     @Configuration
-    @Profile("memgraph")
+    @Profile("oracle")
     @EnableDrivine
     @EnableAspectJAutoProxy(proxyTargetClass = true)
     @EnableConfigurationProperties(GraphRagServiceProperties::class)
@@ -65,29 +56,42 @@ class MemgraphChunkNodePersistenceTest : AbstractChunkNodePersistenceTest() {
         fun dataSourceMap(): DataSourceMap = DataSourceMap(
             mapOf(
                 "graph" to ConnectionProperties(
-                    host = memgraph.host,
-                    port = memgraph.getMappedPort(7687),
-                    userName = "",
-                    password = "",
-                    type = DatabaseType.MEMGRAPH,
-                    databaseName = "memgraph",
+                    host = OracleTestContainer.getConnectionHost(),
+                    port = OracleTestContainer.getConnectionPort(),
+                    userName = OracleTestContainer.getConnectionUsername(),
+                    password = OracleTestContainer.getConnectionPassword(),
+                    type = DatabaseType.ORACLE,
+                    databaseName = OracleTestContainer.SERVICE,
                 )
             )
         )
 
         @Bean("graph")
         fun persistenceManager(factory: PersistenceManagerFactory): PersistenceManager = factory.get("graph")
-
-        @Bean
-        fun graphObjectManager(factory: GraphObjectManagerFactory): StatelessGraphObjectManager = factory.stateless("graph")
     }
 
     @Autowired
-    override lateinit var gom: StatelessGraphObjectManager
+    @Qualifier("graph")
+    lateinit var oracle: PersistenceManager
+
+    // The contract's fixtures are Cypher, which Oracle does not speak: they are worked out over the graph.
+    override val persistenceManager: PersistenceManager by lazy { OracleCypherFixtures.over(oracle) }
 
     @Autowired
-    @Qualifier("graph")
-    override lateinit var persistenceManager: PersistenceManager
+    lateinit var factory: GraphObjectManagerFactory
 
-    override val engineName = "Memgraph"
+    @Autowired
+    lateinit var properties: GraphRagServiceProperties
+
+    override val repository: NamedEntityDataRepository by lazy {
+        val embeddings = SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel())
+        GraphObjectManagerEntityRepository(
+            gom = factory.stateless("graph"),
+            properties = properties,
+            dataDictionary = dictionary,
+            embeddingService = embeddings,
+            entitySchema = EntitySchemaProvisioner(oracle, properties, { embeddings }),
+        )
+    }
+
 }

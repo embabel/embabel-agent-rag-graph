@@ -46,7 +46,7 @@ class Neo4jCypherEntityRepositoryContractTest : AbstractNamedEntityRepositoryCon
             properties = properties,
             dataDictionary = dictionary,
             embeddingService = SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel()),
-            graphObjectManager = factory.get("graph"),
+            graphObjectManager = factory.stateless("graph"),
         )
     }
 }

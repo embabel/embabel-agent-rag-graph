@@ -109,7 +109,7 @@ class MemgraphIngestionTest {
             properties: GraphRagServiceProperties,
         ): GraphObjectManagerStore {
             return GraphObjectManagerStore(
-                gom = gomFactory.get("graph"),
+                gom = gomFactory.stateless("graph"),
                 persistenceManager = persistenceManager,
                 properties = properties,
                 chunkerConfig = ContentChunker.Config(),

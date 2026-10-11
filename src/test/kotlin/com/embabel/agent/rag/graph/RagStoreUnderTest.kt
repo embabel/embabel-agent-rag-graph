@@ -30,7 +30,7 @@ import com.embabel.common.core.types.TextSimilaritySearchRequest
  * two of the three engines (embabel/embabel-agent-rag-graph#35).
  *
  * It was an A/B equivalence check while `DrivineStore` still existed beside the
- * [GraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store. That pairing is gone:
+ * [StatelessGraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store. That pairing is gone:
  * nothing constructed `DrivineStore` outside tests, and the equivalence it proved was between two
  * implementations rather than against the behaviour anyone wanted — it passed while the surviving
  * store rebuilt its index at a stale width (#29). The interface stays because three engines still
@@ -49,7 +49,7 @@ interface RagStoreUnderTest {
     fun expandResult(id: String, method: ResultExpander.Method, elementsToAdd: Int): List<ContentElement>
 }
 
-/** Adapts the [GraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store to [RagStoreUnderTest]. */
+/** Adapts the [StatelessGraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store to [RagStoreUnderTest]. */
 class GomRagStoreAdapter(private val store: GraphObjectManagerStore) : RagStoreUnderTest {
     override fun provision() = store.provision()
     override fun writeAndChunkDocument(doc: NavigableDocument): List<String> = store.writeAndChunkDocument(doc)

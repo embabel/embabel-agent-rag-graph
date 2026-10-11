@@ -40,7 +40,7 @@ import java.util.UUID
  *
  * The spec is written against the [RagStoreUnderTest] seam, so the **same** contract runs against
  * every engine — through the
- * [GraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store — on each of Neo4j,
+ * [StatelessGraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store — on each of Neo4j,
  * FalkorDB, and Memgraph. When the new store's column of that matrix is fully green it is a proven
  * drop-in for the old one.
  *

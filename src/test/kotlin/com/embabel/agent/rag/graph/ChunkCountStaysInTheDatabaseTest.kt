@@ -25,7 +25,7 @@ import com.embabel.common.ai.model.EmbeddingService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -37,7 +37,7 @@ import org.junit.jupiter.api.Test
  */
 class ChunkCountStaysInTheDatabaseTest {
 
-    private val gom = mockk<GraphObjectManager>(relaxed = true)
+    private val gom = mockk<StatelessGraphObjectManager>(relaxed = true)
 
     private val store = GraphObjectManagerStore(
         gom = gom,
