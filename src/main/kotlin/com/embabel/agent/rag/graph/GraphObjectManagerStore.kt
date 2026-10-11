@@ -71,7 +71,7 @@ import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
 import org.drivine.manager.CascadeType
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.delete
 import org.drivine.manager.NullPolicy
 import org.drivine.manager.PersistenceManager
@@ -131,7 +131,7 @@ private const val FULL_TEXT_SUPPRESSION_WARNING_THRESHOLD: Double = 0.5
  * fixed at compile time, so there is no fragment to hang the relationship on.
  */
 class GraphObjectManagerStore(
-    private val gom: GraphObjectManager,
+    private val gom: StatelessGraphObjectManager,
     private val persistenceManager: PersistenceManager,
     private val properties: GraphRagServiceProperties,
     chunkerConfig: ContentChunker.Config,

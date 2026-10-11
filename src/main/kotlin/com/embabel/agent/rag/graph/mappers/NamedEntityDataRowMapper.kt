@@ -18,6 +18,7 @@ package com.embabel.agent.rag.graph.mappers
 import com.embabel.agent.rag.model.NamedEntityData
 import com.embabel.agent.rag.model.SimpleNamedEntityData
 import org.drivine.mapper.RowMapper
+import org.drivine.model.NodeLabelsModel
 
 internal class NamedEntityDataRowMapper : RowMapper<NamedEntityData> {
 
@@ -28,7 +29,14 @@ internal class NamedEntityDataRowMapper : RowMapper<NamedEntityData> {
             name = row["name"] as String,
             description = row["description"] as? String ?: "",
             labels = (row["labels"] as? List<*>)?.map { it.toString() }?.toSet() ?: emptySet(),
-            properties = (row["properties"] as? Map<String, Any>) ?: emptyMap(),
+            properties = entityProperties(row["properties"] as? Map<String, Any>),
         )
     }
 }
+
+/**
+ * A stored node's properties as an entity's: Drivine keeps properties of its own on a node, under
+ * names beginning `__drivine.`, and they are not the entity's.
+ */
+internal fun entityProperties(stored: Map<String, Any>?): Map<String, Any> =
+    stored.orEmpty().filterKeys { !it.startsWith(NodeLabelsModel.RESERVED_PREFIX) }

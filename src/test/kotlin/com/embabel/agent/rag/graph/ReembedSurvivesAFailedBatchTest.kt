@@ -27,7 +27,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import io.mockk.verifyOrder
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.NullPolicy
 import org.drivine.manager.PersistenceManager
 import org.drivine.query.QuerySpecification
@@ -65,7 +65,7 @@ class ReembedSurvivesAFailedBatchTest {
         }
     }
 
-    private val gom = mockk<GraphObjectManager>(relaxed = true)
+    private val gom = mockk<StatelessGraphObjectManager>(relaxed = true)
     private val indexes = mockk<IndexManager>(relaxed = true)
     private val persistence = mockk<PersistenceManager>(relaxed = true).also {
         every { it.indexes } returns indexes

@@ -19,7 +19,7 @@ import com.embabel.agent.rag.ingestion.ChunkTransformer
 import com.embabel.agent.rag.ingestion.ContentChunker
 import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.ai.model.PricingModel
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.drivine.schema.EnsureResult
 import org.drivine.schema.IndexManager
@@ -59,7 +59,7 @@ class ChunkVectorIndexFollowsTheModelTest {
 
     private fun store(embedding: EmbeddingService, persistence: PersistenceManager) =
         GraphObjectManagerStore(
-            gom = mockk<GraphObjectManager>(relaxed = true),
+            gom = mockk<StatelessGraphObjectManager>(relaxed = true),
             persistenceManager = persistence,
             properties = GraphRagServiceProperties(),
             chunkerConfig = ContentChunker.Config(),

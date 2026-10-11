@@ -54,7 +54,7 @@ class FalkorDbGomStoreCharacterizationTest : AbstractRagSearchCharacterizationTe
             persistenceManager: PersistenceManager,
             properties: GraphRagServiceProperties,
         ): GraphObjectManagerStore = GraphObjectManagerStore(
-            gom = factory.get("graph"),
+            gom = factory.stateless("graph"),
             persistenceManager = persistenceManager,
             properties = properties,
             chunkerConfig = ContentChunker.Config(),

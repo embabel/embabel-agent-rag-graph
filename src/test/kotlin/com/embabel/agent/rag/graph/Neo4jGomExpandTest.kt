@@ -24,7 +24,7 @@ import com.embabel.agent.rag.service.ResultExpander
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.autoconfigure.EnableDrivineTestConfig
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
@@ -63,7 +63,7 @@ class Neo4jGomExpandTest {
         @Bean("graph")
         fun persistenceManager(factory: PersistenceManagerFactory): PersistenceManager = factory.get("graph")
         @Bean
-        fun graphObjectManager(factory: GraphObjectManagerFactory): GraphObjectManager = factory.get("graph")
+        fun graphObjectManager(factory: GraphObjectManagerFactory): StatelessGraphObjectManager = factory.stateless("graph")
 
         @Bean
         fun gomStore(
@@ -71,7 +71,7 @@ class Neo4jGomExpandTest {
             pm: PersistenceManager,
             properties: GraphRagServiceProperties,
         ): GraphObjectManagerStore = GraphObjectManagerStore(
-            gom = factory.get("graph"),
+            gom = factory.stateless("graph"),
             persistenceManager = pm,
             properties = properties,
             chunkerConfig = ContentChunker.Config(),
@@ -82,7 +82,7 @@ class Neo4jGomExpandTest {
 
     @Autowired lateinit var store: GraphObjectManagerStore
     @Autowired @Qualifier("graph") lateinit var pm: PersistenceManager
-    @Autowired lateinit var gom: GraphObjectManager
+    @Autowired lateinit var gom: StatelessGraphObjectManager
 
     private lateinit var prefix: String
     private fun id(s: String) = "$prefix-$s"

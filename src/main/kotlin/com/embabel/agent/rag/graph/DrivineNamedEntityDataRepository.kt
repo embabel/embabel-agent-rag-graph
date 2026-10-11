@@ -36,7 +36,7 @@ import com.embabel.common.core.types.TextSimilaritySearchRequest
 import com.embabel.common.util.loggerFor
 import tools.jackson.databind.ObjectMapper
 import tools.jackson.module.kotlin.jacksonObjectMapper
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.drivine.mapper.RowMapper
 import org.drivine.query.QuerySpecification
@@ -88,7 +88,7 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
     private val properties: GraphRagServiceProperties,
     override val dataDictionary: DataDictionary,
     private val embeddingService: EmbeddingService,
-    private val graphObjectManager: GraphObjectManager? = null,
+    private val graphObjectManager: StatelessGraphObjectManager? = null,
     override val objectMapper: ObjectMapper = jacksonObjectMapper(),
     private val queryResolver: LogicalQueryResolver = FixedLocationLogicalQueryResolver(),
     private val namedEntityDataMapper: RowMapper<NamedEntityData> = NamedEntityDataRowMapper(),

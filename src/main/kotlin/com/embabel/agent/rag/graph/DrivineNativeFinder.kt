@@ -19,7 +19,7 @@ import com.embabel.agent.rag.model.NamedEntity
 import com.embabel.agent.rag.service.NativeFinder
 import org.drivine.annotation.GraphView
 import org.drivine.annotation.NodeFragment
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 
 /**
  * [NativeFinder] that uses the Drivine [GraphObjectManager] to load entities
@@ -30,7 +30,7 @@ import org.drivine.manager.GraphObjectManager
  * @param graphObjectManager the Drivine graph object manager for native loading
  */
 class DrivineNativeFinder(
-    private val graphObjectManager: GraphObjectManager,
+    private val graphObjectManager: StatelessGraphObjectManager,
 ) : NativeFinder {
 
     override fun <T : NamedEntity> findById(id: String, type: Class<T>): T? {

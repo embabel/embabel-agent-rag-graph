@@ -24,7 +24,7 @@ import com.embabel.common.ai.model.SpringAiEmbeddingService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.DisplayName
@@ -49,7 +49,7 @@ class FacetThresholdRoutingTest {
     private val fullTextThreshold = slot<Double>()
     private val vectorThreshold = slot<Double>()
 
-    private val gom = mockk<GraphObjectManager>().apply {
+    private val gom = mockk<StatelessGraphObjectManager>().apply {
         every {
             loadMatching(ChunkNode::class.java, any<String>(), any<Int>(), capture(fullTextThreshold))
         } returns emptyList()

@@ -31,7 +31,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
  *
  * This is a cut-down version of the Guide's ChatActions that:
  * - Responds to user messages with RAG-powered context
- * - Uses the GraphObjectManager-backed store for vector/fulltext search
+ * - Uses the StatelessGraphObjectManager-backed store for vector/fulltext search
  * - Uses a configurable LLM for response generation
  */
 @EmbabelComponent
