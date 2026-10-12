@@ -71,6 +71,7 @@ import com.embabel.agent.rag.store.EmbeddingIncompleteException
 import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
+import org.drivine.StaleObjectException
 import org.drivine.annotation.Direction
 import org.drivine.connection.DatabaseType
 import org.drivine.manager.CascadeType
@@ -100,6 +101,9 @@ private const val FULL_TEXT_BM25_K: Double = 3.0
 
 /** Window size for [GraphObjectManagerStore.reembedAll] — bounds heap and per-request embedding size. */
 private const val REEMBED_BATCH_SIZE = 256
+
+/** How many times a window is loaded and re-embedded when a chunk in it changes meanwhile. */
+private const val REEMBED_WINDOW_ATTEMPTS = 3
 
 /**
  * A threshold above this requires a raw full-text score above [FULL_TEXT_BM25_K] — already
@@ -467,16 +471,41 @@ class GraphObjectManagerStore(
      * skipped before the next probe doubles (1, 2, 4, …), so a dead service costs a call per doubling
      * rather than a window of calls each time. A probe that succeeds resumes normal re-embedding, so a
      * run of chunks the model always rejects stops only its own window rather than every window after it.
+     *
+     * A chunk another writer changes or deletes while its window is embedded is not overwritten: see
+     * [reembedWindowOf].
      */
     private fun reembedEveryChunk(onProgress: (done: Int, total: Int) -> Unit): ReembedOutcome {
         val ids = allChunkIds()
         onProgress(0, ids.size)
         return ids.chunked(REEMBED_BATCH_SIZE).asSequence()
             .fold(ReembedOutcome() to 0) { (outcome, walked), window ->
-                reembedWindow(outcome, loadChunks(window).filter { it.text.isNotBlank() })
+                reembedWindowOf(outcome, window)
                     .also { onProgress(walked + window.size, ids.size) } to walked + window.size
             }.first
     }
+
+    /**
+     * Re-embed the chunks with [ids] as the store holds them now.
+     *
+     * A loaded [ChunkNode] carries its stamp, so the save is refused when a chunk was changed or deleted
+     * after the window was loaded. The vectors in hand are then of text that is no longer stored, so the
+     * window is loaded again and embedded from what is there: [REEMBED_WINDOW_ATTEMPTS] tries in all, and
+     * the last refusal is thrown. The chunks saved before the refusal are embedded again with the rest.
+     */
+    private fun reembedWindowOf(outcome: ReembedOutcome, ids: List<String>, attempt: Int = 1): ReembedOutcome =
+        try {
+            reembedWindow(outcome, loadChunks(ids).filter { it.text.isNotBlank() })
+        } catch (stale: StaleObjectException) {
+            if (attempt >= REEMBED_WINDOW_ATTEMPTS) throw stale
+            logger.info(
+                "reembedAll: a chunk changed while its window was embedded, loading the window again (attempt {} of {}): {}",
+                attempt,
+                REEMBED_WINDOW_ATTEMPTS,
+                stale.message,
+            )
+            reembedWindowOf(outcome, ids, attempt + 1)
+        }
 
     /** One window of the walk: embedded, or cleared and counted as missing when the model is failing. */
     private fun reembedWindow(outcome: ReembedOutcome, window: List<ChunkNode>): ReembedOutcome = when {
@@ -513,7 +542,7 @@ class GraphObjectManagerStore(
             logger,
         )
         val (embedded, failed) = window.partition { it.id in result.embeddings }
-        gom.saveAll(embedded.map { it.copy(embedding = result.embeddings.getValue(it.id).toList()) })
+        embedded.forEach { saveVector(it, result.embeddings.getValue(it.id).toList()) }
         clearEmbeddings(failed)
         return result
     }
@@ -526,13 +555,20 @@ class GraphObjectManagerStore(
 
     /**
      * Remove the stored vector from [nodes]. The default save skips null fields, so a null embedding
-     * alone would leave the previous model's vector in place; [NullPolicy.CLEAR] writes the null. Safe
-     * here because every node was loaded whole.
+     * alone would leave the previous model's vector in place.
      */
-    private fun clearEmbeddings(nodes: List<ChunkNode>) {
-        if (nodes.isNotEmpty()) {
-            gom.saveAll(nodes.map { it.copy(embedding = null) }, nullPolicy = NullPolicy.CLEAR)
-        }
+    private fun clearEmbeddings(nodes: List<ChunkNode>) = nodes.forEach { saveVector(it, null) }
+
+    /**
+     * Write [vector] as the embedding of [node], and nothing else of it; a null removes the stored one.
+     *
+     * One save for each chunk, and not `saveAll`: a batch does not compare stamps, and this save must be
+     * refused when the chunk changed after it was loaded.
+     *
+     * @throws StaleObjectException when the chunk was changed or deleted after [node] was loaded
+     */
+    private fun saveVector(node: ChunkNode, vector: List<Float>?) {
+        gom.save(node.copy(embedding = vector), nullPolicy = NullPolicy.CLEAR, only = setOf(ChunkNode::embedding))
     }
 
     /** What [reembedEveryChunk] did, window by window, and whether the next window is probed or skipped. */

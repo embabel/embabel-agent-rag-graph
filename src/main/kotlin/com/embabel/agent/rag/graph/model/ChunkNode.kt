@@ -21,6 +21,7 @@ import org.drivine.annotation.FullTextIndex
 import org.drivine.annotation.GraphProperty
 import org.drivine.annotation.NodeFragment
 import org.drivine.annotation.NodeId
+import org.drivine.annotation.NodeStamp
 import org.drivine.annotation.PropertyBag
 import org.drivine.annotation.VectorIndex
 import org.drivine.schema.SimilarityFunction
@@ -45,6 +46,10 @@ import org.drivine.schema.SimilarityFunction
  * The `embedding` is a [VectorIndex] property, so a single [org.drivine.manager.GraphObjectManager.save]
  * persists structure and embedding together — and on FalkorDB Drivine writes it as `vecf32(...)` so the
  * vector index picks it up (no hand-rolled `vecf32` wrapping).
+ *
+ * [stamp] is filled by a load. A save of a loaded chunk is refused with
+ * [org.drivine.StaleObjectException] when the chunk was changed or deleted after the load. A chunk
+ * built by [from] has no stamp, so ingestion writes it unchecked, as before.
  */
 @NodeFragment(labels = ["Chunk"])
 data class ChunkNode(
@@ -67,6 +72,7 @@ data class ChunkNode(
     override val ordinal: Long? = null,
     @VectorIndex(similarity = SimilarityFunction.COSINE) val embedding: List<Float>? = null,
     @PropertyBag(prefix = "metadata") val freeFormMetadata: Map<String, Any?> = emptyMap(),
+    @NodeStamp val stamp: String? = null,
 ) : ContentElementNode {
 
     /**

@@ -1,13 +1,19 @@
 # Embabel RAG Graph
 
 > Graph-backed RAG for the Embabel Agent Framework: chunk, section and document storage with vector
-> and full-text search on Neo4j, FalkorDB and Memgraph, through Drivine.
+> and full-text search on Neo4j, FalkorDB, Memgraph and Oracle, through Drivine.
 
 ## Rules for changing this code
 
-- Go through Drivine's `GraphObjectManager` first: `@NodeFragment` models, `@GraphView`s and the
-  generated query DSL (`gom.loadAll`, `gom.saveAll`, `gom.delete`). Drivine writes the Cypher for the
-  configured engine, so the same model runs on Neo4j, FalkorDB and Memgraph.
+- Go through Drivine's `StatelessGraphObjectManager` first: `@NodeFragment` models, `@GraphView`s and
+  the generated query DSL (`gom.loadAll`, `gom.saveAll`, `gom.delete`). Drivine writes the Cypher for
+  the configured engine, and SQL/PGQ on Oracle, so the same model runs on Neo4j, FalkorDB, Memgraph
+  and Oracle.
+- Oracle does not run Cypher. A hand-written Cypher statement needs another way there, through the
+  object manager.
+- A chunk loaded from the store carries a stamp (`@NodeStamp`). To change a loaded chunk and write it
+  back, use `gom.save`, which is refused when the chunk changed meanwhile. `saveAll` does not compare
+  stamps.
 - Do not copy the hand-written Cypher that exists elsewhere in this repository as a pattern for
   `GraphObjectManagerStore`. Write Cypher there only when the object manager has no reasonable way
   to say it, for features or for speed, and say why at the site.
@@ -16,11 +22,12 @@
 - Order by a property only with a range index that mirrors the ordering. Drivine's index advisor
   warns when none does.
 - Put each `@NodeFragment` and `@GraphView` in its own file under `graph/model`.
-- A change must pass on all three engines. The cross-engine suite is
-  `AbstractRagSearchCharacterizationTest` and its Neo4j, FalkorDB and Memgraph subclasses.
+- A change must pass on all four engines. The cross-engine suite is
+  `AbstractRagSearchCharacterizationTest` and its Neo4j, FalkorDB, Memgraph and Oracle subclasses.
+  The Oracle ones run with `ORACLE_TESTS=true mvn test -Dtest='Oracle*'`.
 
 ## Where things are
 
-- [README](README.md): overview, configuration and testing.
+- [README](README.md): overview, configuration, running on Oracle, and testing.
 - `src/main/kotlin/com/embabel/agent/rag/graph/GraphObjectManagerStore.kt`: the store.
 - `src/main/kotlin/com/embabel/agent/rag/graph/model/`: fragments and views.
