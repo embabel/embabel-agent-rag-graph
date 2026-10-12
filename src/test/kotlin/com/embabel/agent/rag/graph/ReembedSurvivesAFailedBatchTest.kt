@@ -28,6 +28,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import io.mockk.verifyOrder
 import org.drivine.manager.StatelessGraphObjectManager
+import org.drivine.StaleObjectException
 import org.drivine.manager.NullPolicy
 import org.drivine.manager.PersistenceManager
 import org.drivine.query.QuerySpecification
@@ -82,11 +83,12 @@ class ReembedSurvivesAFailedBatchTest {
         // The ids are listed first, then served a window at a time, as the store loads them.
         every { gom.loadAll(ChunkPlaceFragment::class.java) } returns nodes.map { ChunkPlaceFragment(it.id) }
         every { gom.loadAll(ChunkNode::class.java, any<ChunkNodeQueryDsl>(), any()) } returnsMany nodes.chunked(256)
-        every { gom.saveAll(any<List<ChunkNode>>(), any(), any()) } answers {
-            val nodes = firstArg<List<ChunkNode>>()
-            saved += nodes
-            if (thirdArg<NullPolicy>() == NullPolicy.CLEAR) cleared += nodes.map { it.id }
-            nodes
+        // A re-embed saves each chunk by itself, and a chunk with no vector is one it cleared.
+        every { gom.save(any<ChunkNode>(), any(), any(), any(), any()) } answers {
+            val node = firstArg<ChunkNode>()
+            saved += node
+            if (node.embedding == null && thirdArg<NullPolicy>() == NullPolicy.CLEAR) cleared += node.id
+            node
         }
         return GraphObjectManagerStore(
             gom = gom,
@@ -143,6 +145,21 @@ class ReembedSurvivesAFailedBatchTest {
         assertNull(byId.getValue("c3").embedding, "an old-model vector must not sit under the new index")
         assertEquals(setOf("c3"), cleared, "only a save that clears nulls removes the stored vector")
         assertTrue(byId.filterKeys { it != "c3" }.values.all { it.embedding == List(width) { 1f } })
+    }
+
+    @Test
+    fun `a chunk that changes each time its window is loaded fails the re-embed after three tries, and the index is rebuilt`() {
+        val store = store(Rejecting(emptySet()), chunks(2))
+        every { gom.save(any<ChunkNode>(), any(), any(), any(), any()) } throws
+            StaleObjectException(ChunkNode::class.java, "c1", "loaded:loaded", "found:found", deleted = false)
+
+        assertThrows<StaleObjectException> { store.reembedAll() }
+
+        verify(exactly = 3) { gom.loadAll(ChunkNode::class.java, any<ChunkNodeQueryDsl>(), any()) }
+        verifyOrder {
+            indexes.drop(any())
+            indexes.ensure(any())
+        }
     }
 
     @Test

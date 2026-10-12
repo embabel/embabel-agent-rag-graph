@@ -69,6 +69,16 @@ class Neo4jReembedClearsFailedVectorTest {
         }
     }
 
+    /** Runs [beforeNextCall] once, before the next call that embeds, as another writer would act while a re-embed is under way. */
+    class Interrupted(private val delegate: EmbeddingService) : EmbeddingService by delegate {
+        var beforeNextCall: (() -> Unit)? = null
+        override fun embed(text: String): FloatArray = embed(listOf(text)).single()
+        override fun embed(texts: List<String>): List<FloatArray> {
+            beforeNextCall?.also { beforeNextCall = null }?.invoke()
+            return delegate.embed(texts)
+        }
+    }
+
     @Configuration
     @Profile("neo4j")
     @EnableDrivine
@@ -82,7 +92,7 @@ class Neo4jReembedClearsFailedVectorTest {
         fun graphObjectManager(factory: GraphObjectManagerFactory): StatelessGraphObjectManager = factory.stateless("graph")
         @Bean
         fun embeddingService(): EmbeddingService =
-            Rejecting(SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel()))
+            Interrupted(Rejecting(SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel())))
 
         @Bean
         fun gomStore(
@@ -143,6 +153,29 @@ class Neo4jReembedClearsFailedVectorTest {
         val good = gom.load<ChunkNode>(goodId)?.embedding
         assertNotNull(good)
         assertNotEquals(List(embeddingService.dimensions) { 1f }, good, "the embedded chunk has a new vector")
+    }
+
+    @Test
+    fun `a chunk rewritten while it was being embedded keeps its new text, and is embedded from it`() {
+        seed(goodId, "the text the re-embed loaded")
+        // A second chunk, so the window is a batch: a batch save does not compare stamps.
+        seed("$prefix-untouched", "a chunk no other writer changes")
+        val rewritten = "the text another writer saved meanwhile"
+        (embeddingService as Interrupted).beforeNextCall = {
+            gom.save(ChunkNode(id = goodId, text = rewritten, urtext = rewritten, parentId = "$prefix-parent"))
+        }
+
+        store.reembedAll()
+
+        val stored = requireNotNull(gom.load<ChunkNode>(goodId))
+        assertEquals(rewritten, stored.text, "the re-embed must not write back the text it loaded")
+        val ofTheNewText = embeddingService.embed(listOf(stored.toCoreType().embeddableValue())).single().toList()
+        assertEquals(ofTheNewText, stored.embedding, "the vector is of the text the chunk has now")
+        assertNotEquals(
+            List(embeddingService.dimensions) { 1f },
+            gom.load<ChunkNode>("$prefix-untouched")?.embedding,
+            "the chunk nobody changed has a new vector",
+        )
     }
 
     @Test

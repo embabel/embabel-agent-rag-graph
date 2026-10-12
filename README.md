@@ -206,6 +206,9 @@ its author tried it.
 - Write Cypher only when the object manager has no reasonable way to say it, for features or for
   speed, and say why at the site.
 - When Drivine cannot express something, prefer adding it to Drivine.
+- A chunk loaded from the store carries a stamp (`@NodeStamp`), so `gom.save` of it is refused with
+  `StaleObjectException` when the chunk changed after the load. `saveAll` does not compare stamps: a
+  loaded chunk that is changed and written back is saved one at a time, as `reembedAll` does.
 
 One site in the store is still Cypher: the entity-to-chunk lookup, because the entity label is
 configuration and a fragment's labels are fixed at compile time. On Oracle it loads what the entity is
