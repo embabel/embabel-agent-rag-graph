@@ -78,7 +78,7 @@ class Neo4jRelationshipEndpointMatchTest {
             properties = properties,
             dataDictionary = DataDictionary.fromDomainTypes("test", emptyList()),
             embeddingService = SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel()),
-            graphObjectManager = factory.get("graph"),
+            graphObjectManager = factory.stateless("graph"),
         )
     }
 

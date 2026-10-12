@@ -21,7 +21,7 @@ import com.embabel.agent.rag.ingestion.ContentChunker
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.autoconfigure.EnableDrivineTestConfig
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
@@ -60,7 +60,7 @@ class Neo4jGomStoreCharacterizationTest : AbstractRagSearchCharacterizationTest(
             persistenceManager: PersistenceManager,
             properties: GraphRagServiceProperties,
         ): GraphObjectManagerStore = GraphObjectManagerStore(
-            gom = factory.get("graph"),
+            gom = factory.stateless("graph"),
             persistenceManager = persistenceManager,
             properties = properties,
             chunkerConfig = ContentChunker.Config(),

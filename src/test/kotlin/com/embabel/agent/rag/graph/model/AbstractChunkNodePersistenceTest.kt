@@ -18,7 +18,7 @@ package com.embabel.agent.rag.graph.model
 import com.embabel.agent.rag.model.Chunk
 import com.embabel.agent.rag.model.LeafSection
 import com.embabel.agent.rag.model.MaterializedDocument
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.drivine.query.QuerySpecification
 import org.junit.jupiter.api.AfterEach
@@ -31,7 +31,7 @@ import java.util.UUID
 
 /**
  * Cross-engine proof that a [ChunkNode] persists and round-trips through Drivine's
- * [GraphObjectManager] — the storage primitive the GraphObjectManager-backed store will build on.
+ * [StatelessGraphObjectManager] — the storage primitive the StatelessGraphObjectManager-backed store will build on.
  *
  * Pins the three things the hand-rolled path did by hand (and the migration must preserve):
  *  - `@GraphProperty` promoted fields are stored **flat under their snake_case on-disk names**
@@ -42,7 +42,7 @@ import java.util.UUID
  */
 abstract class AbstractChunkNodePersistenceTest {
 
-    protected abstract val gom: GraphObjectManager
+    protected abstract val gom: StatelessGraphObjectManager
     protected abstract val persistenceManager: PersistenceManager
     protected abstract val engineName: String
 

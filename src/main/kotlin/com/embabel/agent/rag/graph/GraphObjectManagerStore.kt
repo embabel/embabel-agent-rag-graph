@@ -24,6 +24,7 @@ import com.embabel.agent.rag.graph.fulltext.searchPreparedQuery
 import com.embabel.agent.rag.graph.fulltext.syntaxNotesFor
 import com.embabel.agent.rag.graph.model.ChunkExpandView
 import com.embabel.agent.rag.graph.model.ChunkNode
+import com.embabel.agent.rag.graph.model.EntityNode
 import com.embabel.agent.rag.graph.model.ChunkPlaceFragment
 import com.embabel.agent.rag.graph.model.ContentElementFragment
 import com.embabel.agent.rag.graph.model.NextChunkLinkView
@@ -70,8 +71,11 @@ import com.embabel.agent.rag.store.EmbeddingIncompleteException
 import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
+import org.drivine.annotation.Direction
+import org.drivine.connection.DatabaseType
 import org.drivine.manager.CascadeType
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.NodeRef
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.delete
 import org.drivine.manager.NullPolicy
 import org.drivine.manager.PersistenceManager
@@ -131,7 +135,7 @@ private const val FULL_TEXT_SUPPRESSION_WARNING_THRESHOLD: Double = 0.5
  * fixed at compile time, so there is no fragment to hang the relationship on.
  */
 class GraphObjectManagerStore(
-    private val gom: GraphObjectManager,
+    private val gom: StatelessGraphObjectManager,
     private val persistenceManager: PersistenceManager,
     private val properties: GraphRagServiceProperties,
     chunkerConfig: ContentChunker.Config,
@@ -644,6 +648,11 @@ class GraphObjectManagerStore(
 
     // Entity → chunk is a relationship traversal — kept as Cypher; entities are not modelled yet.
     override fun findChunksForEntity(entityId: String): List<Chunk> {
+        // Oracle does not speak Cypher: there the chunks are loaded as what the entity is related to.
+        if (persistenceManager.type == DatabaseType.ORACLE) {
+            val chunks = gom.edges.loadRelated(NodeRef(EntityNode::class.java, entityId), "HAS_ENTITY", Direction.INCOMING, ChunkNode::class.java)
+            return findAllChunksById(chunks.map { it.id }).toList()
+        }
         val ids = persistenceManager.queryForScalars(
             purpose = "find-chunks-for-entity (gom store)",
             // A label can't be a bound parameter in Cypher — it's structural — so Drivine's `render`

@@ -36,7 +36,8 @@ import com.embabel.common.core.types.TextSimilaritySearchRequest
 import com.embabel.common.util.loggerFor
 import tools.jackson.databind.ObjectMapper
 import tools.jackson.module.kotlin.jacksonObjectMapper
-import org.drivine.manager.GraphObjectManager
+import org.drivine.connection.DatabaseType
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.drivine.mapper.RowMapper
 import org.drivine.query.QuerySpecification
@@ -88,7 +89,7 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
     private val properties: GraphRagServiceProperties,
     override val dataDictionary: DataDictionary,
     private val embeddingService: EmbeddingService,
-    private val graphObjectManager: GraphObjectManager? = null,
+    private val graphObjectManager: StatelessGraphObjectManager? = null,
     override val objectMapper: ObjectMapper = jacksonObjectMapper(),
     private val queryResolver: LogicalQueryResolver = FixedLocationLogicalQueryResolver(),
     private val namedEntityDataMapper: RowMapper<NamedEntityData> = NamedEntityDataRowMapper(),
@@ -115,6 +116,15 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
 ) : NamedEntityDataRepository {
 
     private val logger = loggerFor<DrivineNamedEntityDataRepository>()
+
+    init {
+        // Every statement of this repository is Cypher, written by hand. Oracle speaks SQL.
+        if (persistenceManager.type == DatabaseType.ORACLE) {
+            throw UnsupportedOperationException(
+                "DrivineNamedEntityDataRepository writes Cypher, which Oracle does not speak. Use GraphObjectManagerEntityRepository."
+            )
+        }
+    }
 
     override val nativeFinder: NativeFinder = run {
         val drivine = graphObjectManager?.let { DrivineNativeFinder(it) }

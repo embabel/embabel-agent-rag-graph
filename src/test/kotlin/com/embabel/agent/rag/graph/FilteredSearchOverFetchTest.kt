@@ -26,7 +26,7 @@ import com.embabel.common.core.types.TextSimilaritySearchRequest
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import io.mockk.every
 import io.mockk.mockk
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -116,7 +116,7 @@ class FilteredSearchOverFetchTest {
         private val searchKs = mutableListOf<Int?>()
         private val properties = GraphRagServiceProperties()
 
-        private val gom = mockk<GraphObjectManager>().apply {
+        private val gom = mockk<StatelessGraphObjectManager>().apply {
             every {
                 loadNearest(
                     ChunkNode::class.java, any<ChunkNodeQueryDsl>(), any<List<Float>>(),

@@ -4,12 +4,13 @@ RAG (Retrieval-Augmented Generation) implementation for graph databases using Dr
 
 ## Overview
 
-This module provides a graph-database-backed implementation of the RAG pattern using Drivine4j. It supports **Neo4j**, **FalkorDB**, and **Memgraph** through Drivine, which writes the Cypher for the configured engine.
+This module provides a graph-database-backed implementation of the RAG pattern using Drivine4j. It supports **Neo4j**, **FalkorDB**, **Memgraph** and **Oracle** through Drivine, which writes the Cypher for the configured engine, or SQL/PGQ on Oracle.
 
 ### Key Components
 
-- **GraphObjectManagerStore**: content repository for documents, sections, chunks and embeddings, with vector and full-text search, through Drivine's `GraphObjectManager`
-- **DrivineNamedEntityDataRepository**: storage and search for named entities and their relationships
+- **GraphObjectManagerStore**: content repository for documents, sections, chunks and embeddings, with vector and full-text search, through Drivine's `StatelessGraphObjectManager`
+- **GraphObjectManagerEntityRepository**: storage and search for named entities and their relationships, through the object manager, on every engine
+- **DrivineNamedEntityDataRepository**: the same in hand-written Cypher, for the Cypher engines only
 - **LogicalQueryResolver**: resolves logical query names to Cypher query files
 - **CypherQueryTools**: LLM-facing tools that run validated, read-only Cypher
 
@@ -24,9 +25,12 @@ This module provides a graph-database-backed implementation of the RAG pattern u
 | Unique constraints | `CREATE CONSTRAINT` | `GRAPH.CONSTRAINT CREATE` (Redis) |
 | Embedding storage | Node property | Node property |
 
+Oracle has no Cypher procedures to list here: Drivine keeps a vector index and an Oracle Text index
+beside the graph's tables. See [Oracle](#oracle).
+
 ## Dependencies
 
-- **Drivine4j** (0.0.30+): Graph database driver with Neo4j and FalkorDB support
+- **Drivine4j** (0.1.0+): Graph database driver with Neo4j, FalkorDB, Memgraph and Oracle support
 - **Embabel Agent RAG Pipeline**: Core RAG abstractions and interfaces
 - **Spring Boot**: Dependency injection and transaction management
 - **Kotlin**: Implementation language
@@ -47,7 +51,7 @@ Add this dependency to your project:
 
 ```kotlin
 val store: GraphRagStore = GraphObjectManagerStore(
-    gom = graphObjectManagerFactory.get("graph"),
+    gom = graphObjectManagerFactory.stateless("graph"),
     persistenceManager = persistenceManager,
     properties = properties,            // GraphRagServiceProperties
     chunkerConfig = ContentChunker.Config(),
@@ -57,8 +61,8 @@ val store: GraphRagStore = GraphObjectManagerStore(
 store.provision()                       // indexes and constraints, idempotent
 ```
 
-The engine is whichever Drivine datasource the managers are bound to; Drivine writes the Cypher for
-it, so nothing engine-specific is passed in.
+The engine is whichever Drivine datasource the managers are bound to; Drivine writes the statements
+for it, so nothing engine-specific is passed in.
 
 ## Configuration
 
@@ -68,7 +72,7 @@ Configure connection and RAG properties in your application configuration:
 database:
   datasources:
     graph:
-      type: NEO4J          # or FALKORDB, MEMGRAPH
+      type: NEO4J          # or FALKORDB, MEMGRAPH; for ORACLE see below
       host: localhost
       port: 7687
       user-name: neo4j
@@ -113,6 +117,77 @@ score, so they gain row count but not ordering.
 `Neo4jVectorRecallSearchKTest` measures all of the above against exhaustive `vector.similarity.cosine`
 ground truth, and is the place to re-measure if the corpus or index configuration changes.
 
+### Oracle
+
+Oracle Database 23ai or later. Oracle does not speak Cypher: Drivine reads the graph with SQL/PGQ and
+writes it as rows, and the store and the entity repository are the same classes as on the other
+engines.
+
+1. Add the JDBC driver. Drivine does not bring it:
+
+   ```xml
+   <dependency>
+       <groupId>com.oracle.database.jdbc</groupId>
+       <artifactId>ojdbc11</artifactId>
+   </dependency>
+   ```
+
+2. Point the datasource at the database:
+
+   ```yaml
+   database:
+     datasources:
+       graph:
+         type: ORACLE
+         host: localhost
+         port: 1521                  # the default
+         database-name: FREEPDB1     # the service to connect to
+         user-name: app
+         password: secret
+         default-graph-path: drivine # names the property graph and its tables; this is the default
+   ```
+
+   Drivine makes the graph's tables and the property graph over them in this user's schema, the first
+   time a manager speaks to the graph. `provision()` adds the indexes, with a trigger for each vector
+   index. The user needs the privileges to create them.
+
+3. Build the store and the entity repository on the stateless object manager:
+
+   ```kotlin
+   val gom = graphObjectManagerFactory.stateless("graph")
+
+   val store = GraphObjectManagerStore(
+       gom = gom,
+       persistenceManager = persistenceManager,
+       properties = properties,
+       chunkerConfig = ContentChunker.Config(),
+       chunkTransformer = ChunkTransformer.NO_OP,
+       embeddingService = embeddingService,
+   )
+   store.provision()
+
+   val entities = GraphObjectManagerEntityRepository(
+       gom = gom,
+       properties = properties,
+       dataDictionary = dataDictionary,
+       embeddingService = embeddingService,
+       entitySchema = EntitySchemaProvisioner(persistenceManager, properties, { embeddingService }),
+   )
+   ```
+
+What differs on Oracle:
+
+- `DrivineNamedEntityDataRepository` throws `UnsupportedOperationException` when it is constructed over
+  an Oracle datasource: every statement in it is Cypher. Use `GraphObjectManagerEntityRepository`.
+- `CypherQueryTools` and `LogicalQueryResolver` run Cypher, so they do not apply.
+- Full-text search is Oracle Text, which is in the regular Oracle Free image and not the slim one. Its
+  index holds what has been committed, so a search does not see its own transaction's writes.
+- Oracle Text scores are on a different scale from Lucene's. A full-text score threshold tuned on
+  Neo4j may cut differently, and has not been measured on Oracle.
+- `reembedAll` over stored embeddings of mixed dimensions has not been verified on Oracle.
+
+Drivine's README has the rest: how the graph is stored, connection pooling, and writing SQL by hand.
+
 ### FalkorDB Notes
 
 - Unique constraints require the Redis command `GRAPH.CONSTRAINT CREATE`, which must be issued through the FalkorDB driver directly (not via Cypher).
@@ -121,9 +196,9 @@ ground truth, and is the place to re-measure if the corpus or index configuratio
 
 ## Working on the store: object manager first
 
-`GraphObjectManagerStore` reads and writes through Drivine's `GraphObjectManager`: `@NodeFragment`
+`GraphObjectManagerStore` reads and writes through Drivine's `StatelessGraphObjectManager`: `@NodeFragment`
 models, `@GraphView`s and the generated query DSL. Drivine writes the Cypher for the configured
-engine, so one model runs on Neo4j, FalkorDB and Memgraph. A hand-written statement runs wherever
+engine, so one model runs on Neo4j, FalkorDB, Memgraph and Oracle. A hand-written statement runs wherever
 its author tried it.
 
 - Express a new read or write as a fragment, a view or a DSL query first.
@@ -133,7 +208,8 @@ its author tried it.
 - When Drivine cannot express something, prefer adding it to Drivine.
 
 One site in the store is still Cypher: the entity-to-chunk lookup, because the entity label is
-configuration and a fragment's labels are fixed at compile time.
+configuration and a fragment's labels are fixed at compile time. On Oracle it loads what the entity is
+related to through the object manager instead.
 
 ## Testing
 
@@ -141,6 +217,13 @@ Integration tests use Testcontainers (Neo4j by default; FalkorDB and Memgraph ar
 
 ```bash
 mvn test
+```
+
+The Oracle tests are left out of a plain run, because the image is large. They start Oracle Free in a
+container:
+
+```bash
+ORACLE_TESTS=true mvn test -Dtest='Oracle*'
 ```
 
 ## License

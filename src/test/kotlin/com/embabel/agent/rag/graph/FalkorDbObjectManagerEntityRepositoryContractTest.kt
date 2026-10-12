@@ -43,7 +43,7 @@ class FalkorDbObjectManagerEntityRepositoryContractTest : AbstractNamedEntityRep
     override val repository: NamedEntityDataRepository by lazy {
         val embeddings = SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel())
         GraphObjectManagerEntityRepository(
-            gom = factory.get("graph"),
+            gom = factory.stateless("graph"),
             properties = properties,
             dataDictionary = dictionary,
             embeddingService = embeddings,

@@ -23,7 +23,7 @@ import com.embabel.agent.rag.model.Chunk
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.autoconfigure.EnableDrivineTestConfig
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
@@ -67,7 +67,7 @@ class Neo4jGomReSaveEmbeddingTest {
         @Bean("graph")
         fun persistenceManager(factory: PersistenceManagerFactory): PersistenceManager = factory.get("graph")
         @Bean
-        fun graphObjectManager(factory: GraphObjectManagerFactory): GraphObjectManager = factory.get("graph")
+        fun graphObjectManager(factory: GraphObjectManagerFactory): StatelessGraphObjectManager = factory.stateless("graph")
         @Bean
         fun embeddingService() = SpringAiEmbeddingService("fake", "embabel", DeterministicEmbeddingModel())
 
@@ -78,7 +78,7 @@ class Neo4jGomReSaveEmbeddingTest {
             properties: GraphRagServiceProperties,
             embeddingService: SpringAiEmbeddingService,
         ): GraphObjectManagerStore = GraphObjectManagerStore(
-            gom = factory.get("graph"),
+            gom = factory.stateless("graph"),
             persistenceManager = pm,
             properties = properties,
             chunkerConfig = ContentChunker.Config(),
@@ -89,7 +89,7 @@ class Neo4jGomReSaveEmbeddingTest {
 
     @Autowired lateinit var store: GraphObjectManagerStore
     @Autowired @Qualifier("graph") lateinit var pm: PersistenceManager
-    @Autowired lateinit var gom: GraphObjectManager
+    @Autowired lateinit var gom: StatelessGraphObjectManager
     @Autowired lateinit var embeddingService: SpringAiEmbeddingService
 
     private lateinit var chunkId: String

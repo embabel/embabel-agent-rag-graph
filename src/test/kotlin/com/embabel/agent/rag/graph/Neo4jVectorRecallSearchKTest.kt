@@ -20,7 +20,7 @@ import com.embabel.agent.rag.graph.model.ChunkNode
 import com.embabel.agent.rag.graph.model.ChunkNodeQueryDsl
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.autoconfigure.EnableDrivineTestConfig
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
@@ -99,7 +99,7 @@ class Neo4jVectorRecallSearchKTest {
         fun persistenceManager(factory: PersistenceManagerFactory): PersistenceManager = factory.get("graph")
 
         @Bean
-        fun graphObjectManager(factory: GraphObjectManagerFactory): GraphObjectManager = factory.get("graph")
+        fun graphObjectManager(factory: GraphObjectManagerFactory): StatelessGraphObjectManager = factory.stateless("graph")
     }
 
     @Autowired
@@ -107,7 +107,7 @@ class Neo4jVectorRecallSearchKTest {
     lateinit var pm: PersistenceManager
 
     @Autowired
-    lateinit var gom: GraphObjectManager
+    lateinit var gom: StatelessGraphObjectManager
 
     private companion object {
         const val LABEL = "RecallProbe"

@@ -25,7 +25,7 @@ import com.embabel.agent.rag.model.NavigableSection
 import com.embabel.common.ai.model.SpringAiEmbeddingService
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.autoconfigure.EnableDrivineTestConfig
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
@@ -65,7 +65,7 @@ class Neo4jDocumentOutlineTest {
         @Bean("graph")
         fun persistenceManager(factory: PersistenceManagerFactory): PersistenceManager = factory.get("graph")
         @Bean
-        fun graphObjectManager(factory: GraphObjectManagerFactory): GraphObjectManager = factory.get("graph")
+        fun graphObjectManager(factory: GraphObjectManagerFactory): StatelessGraphObjectManager = factory.stateless("graph")
 
         @Bean
         fun gomStore(
@@ -73,7 +73,7 @@ class Neo4jDocumentOutlineTest {
             pm: PersistenceManager,
             properties: GraphRagServiceProperties,
         ): GraphObjectManagerStore = GraphObjectManagerStore(
-            gom = factory.get("graph"),
+            gom = factory.stateless("graph"),
             persistenceManager = pm,
             properties = properties,
             chunkerConfig = ContentChunker.Config(),

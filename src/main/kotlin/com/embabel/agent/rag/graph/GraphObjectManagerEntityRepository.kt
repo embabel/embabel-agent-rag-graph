@@ -36,7 +36,7 @@ import com.embabel.common.ai.model.EmbeddingService
 import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
 import org.drivine.annotation.Direction
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.NodeRef
 import org.drivine.manager.RelateMode
 import org.drivine.manager.Scored
@@ -79,7 +79,7 @@ private typealias EntityPredicate = context(WhereBuilder<*>) ResolvableNodeRefer
  * @param entitySchema owns the entity indexes the searches use — see [EntitySchemaProvisioner]
  */
 class GraphObjectManagerEntityRepository private constructor(
-    private val gom: GraphObjectManager,
+    private val gom: StatelessGraphObjectManager,
     private val properties: GraphRagServiceProperties,
     override val dataDictionary: DataDictionary,
     private val embeddingService: EmbeddingService,
@@ -89,7 +89,7 @@ class GraphObjectManagerEntityRepository private constructor(
 ) : NamedEntityDataRepository {
 
     constructor(
-        gom: GraphObjectManager,
+        gom: StatelessGraphObjectManager,
         properties: GraphRagServiceProperties,
         dataDictionary: DataDictionary,
         embeddingService: EmbeddingService,

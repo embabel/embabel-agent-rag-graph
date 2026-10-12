@@ -18,7 +18,7 @@ package com.embabel.agent.rag.graph.model
 import com.embabel.agent.rag.graph.GraphRagServiceProperties
 import org.drivine.autoconfigure.EnableDrivine
 import org.drivine.autoconfigure.EnableDrivineTestConfig
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.GraphObjectManagerFactory
 import org.drivine.manager.PersistenceManager
 import org.drivine.manager.PersistenceManagerFactory
@@ -47,11 +47,11 @@ class FalkorDbChunkNodePersistenceTest : AbstractChunkNodePersistenceTest() {
         fun persistenceManager(factory: PersistenceManagerFactory): PersistenceManager = factory.get("graph")
 
         @Bean
-        fun graphObjectManager(factory: GraphObjectManagerFactory): GraphObjectManager = factory.get("graph")
+        fun graphObjectManager(factory: GraphObjectManagerFactory): StatelessGraphObjectManager = factory.stateless("graph")
     }
 
     @Autowired
-    override lateinit var gom: GraphObjectManager
+    override lateinit var gom: StatelessGraphObjectManager
 
     @Autowired
     @Qualifier("graph")

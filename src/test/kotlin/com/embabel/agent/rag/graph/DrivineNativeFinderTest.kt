@@ -20,7 +20,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.drivine.annotation.NodeFragment
-import org.drivine.manager.GraphObjectManager
+import org.drivine.manager.StatelessGraphObjectManager
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
@@ -36,7 +36,7 @@ interface NonNativeProduct : NamedEntity {
 
 class DrivineNativeFinderTest {
 
-    private val graphObjectManager: GraphObjectManager = mockk()
+    private val graphObjectManager: StatelessGraphObjectManager = mockk()
     private val finder = DrivineNativeFinder(graphObjectManager)
 
     @Nested
