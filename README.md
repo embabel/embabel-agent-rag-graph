@@ -187,6 +187,23 @@ full-text indexes differ more than queries do (procedures on Neo4j, Redis comman
 modules on Memgraph, a vector index and an Oracle Text index on Oracle) and Drivine creates and
 queries each of them the same way.
 
+Filtered vector search in the store is one call. `ChunkNodeQueryDsl` is generated from the `ChunkNode`
+fragment, so the filter is checked by the compiler:
+
+```kotlin
+val nearest: List<Scored<ChunkNode>> = gom.loadNearest(
+    ChunkNode::class.java, ChunkNodeQueryDsl.INSTANCE,
+    embeddingService.embed("how do I rotate a refresh token?").toList(),
+    topK = 10,
+    threshold = 0.7,
+) {
+    where { query.rootDocumentId eq documentId }
+}
+```
+
+That reads the chunk vector index on any of the four databases. The same call with no `where` is an
+unfiltered search, and `gom.loadMatching` is its full-text counterpart.
+
 It costs little. A load or a save is one statement and one round trip however many relationships it
 carries. [graph-bench](https://github.com/liberation-data/graph-bench) runs the same Drivine code on
 Neo4j, FalkorDB and Oracle over a graph of 1.1 million nodes and 4.5 million relationships, checks that
