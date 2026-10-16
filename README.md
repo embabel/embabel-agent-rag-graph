@@ -1,71 +1,31 @@
 # Embabel RAG Graph
 
-RAG (Retrieval-Augmented Generation) implementation for graph databases using Drivine, part of the Embabel Agent framework.
+A graph-backed RAG store for the Embabel Agent framework: documents, sections, chunks and named
+entities, with vector search, full-text search and context expansion. It runs on four databases
+through [Drivine4j](https://github.com/liberation-data/drivine4j).
 
-## Overview
+## Supported databases
 
-This module provides a graph-database-backed implementation of the RAG pattern using Drivine4j. It supports **Neo4j**, **FalkorDB**, **Memgraph** and **Oracle** through Drivine, which writes the Cypher for the configured engine, or SQL/PGQ on Oracle.
-
-### Key Components
-
-- **GraphObjectManagerStore**: content repository for documents, sections, chunks and embeddings, with vector and full-text search, through Drivine's `StatelessGraphObjectManager`
-- **GraphObjectManagerEntityRepository**: storage and search for named entities and their relationships, through the object manager, on every engine
-- **DrivineNamedEntityDataRepository**: the same in hand-written Cypher, for the Cypher engines only
-- **LogicalQueryResolver**: resolves logical query names to Cypher query files
-- **CypherQueryTools**: LLM-facing tools that run validated, read-only Cypher
-
-### Supported Databases
-
-| Feature | Neo4j | FalkorDB | Memgraph | Oracle ![New](https://img.shields.io/badge/NEW-ff3e00?style=flat-square) |
-|---|---|---|---|---|
-| Vector index creation | `CREATE VECTOR INDEX` | `CREATE VECTOR INDEX` | `CREATE VECTOR INDEX … WITH CONFIG` | `CREATE VECTOR INDEX … ORGANIZATION NEIGHBOR PARTITIONS`, over a table of embeddings beside the nodes |
-| Vector search | `db.index.vector.queryNodes` | `db.idx.vector.queryNodes` + `vecf32()` | `vector_search.search` | `VECTOR_DISTANCE` + `FETCH APPROX FIRST n ROWS` |
-| Fulltext index | `CREATE FULLTEXT INDEX` | `db.idx.fulltext.createNodeIndex` | `CREATE TEXT INDEX` | Oracle Text index, over a table of the indexed text beside the nodes |
-| Fulltext search | `db.index.fulltext.queryNodes` | `db.idx.fulltext.queryNodes` | `text_search.search_all` | `CONTAINS` |
-| Unique constraints | `CREATE CONSTRAINT` | `GRAPH.CONSTRAINT CREATE` (Redis) | `CREATE CONSTRAINT … IS UNIQUE` | `CREATE UNIQUE INDEX` |
-| Embedding storage | Node property | Node property | Node property | Node property, copied to the embeddings table by a trigger |
-
-Drivine writes all of these. For Oracle, see [Oracle](#oracle).
-
-## Dependencies
-
-- **Drivine4j** (0.1.0+): Graph database driver with Neo4j, FalkorDB, Memgraph and Oracle support
-- **Embabel Agent RAG Pipeline**: Core RAG abstractions and interfaces
-- **Spring Boot**: Dependency injection and transaction management
-- **Kotlin**: Implementation language
+| Database | Notes |
+|---|---|
+| **Neo4j** | The only engine where metadata-filtered vector search re-ranks by exact similarity (see [below](#filtered-vector-search-and-k)). |
+| **FalkorDB** | Fastest on most workloads in [graph-bench](https://github.com/liberation-data/graph-bench). Unique constraints are a Redis command and a full-text index covers one property; Drivine handles both. |
+| **Memgraph** | Needs the `memgraph/memgraph-mage` image, which has the vector and text search modules. |
+| **Oracle** ![New](https://img.shields.io/badge/NEW-ff3e00?style=flat-square) | Oracle Database 23ai or later. No Cypher: Drivine reads with SQL/PGQ and writes rows. Needs the JDBC driver and the full Oracle Free image for full-text search. See [Oracle](#oracle). |
 
 ## Usage
 
-Add this dependency to your project:
+Add the dependency:
 
 ```xml
 <dependency>
     <groupId>com.embabel.agent</groupId>
     <artifactId>embabel-agent-rag-graph</artifactId>
-    <version>0.5.0-SNAPSHOT</version>
+    <version>0.6.0-SNAPSHOT</version>
 </dependency>
 ```
 
-### Creating the store
-
-```kotlin
-val store: GraphRagStore = GraphObjectManagerStore(
-    gom = graphObjectManagerFactory.stateless("graph"),
-    persistenceManager = persistenceManager,
-    properties = properties,            // GraphRagServiceProperties
-    chunkerConfig = ContentChunker.Config(),
-    chunkTransformer = ChunkTransformer.NO_OP,
-    embeddingService = embeddingService,
-)
-store.provision()                       // indexes and constraints, idempotent
-```
-
-The engine is whichever Drivine datasource the managers are bound to; Drivine writes the statements
-for it, so nothing engine-specific is passed in.
-
-## Configuration
-
-Configure connection and RAG properties in your application configuration:
+Configure a Drivine datasource and the RAG properties:
 
 ```yaml
 database:
@@ -90,31 +50,32 @@ embabel:
         max-filtered-search-k: 500         # ceiling on the widened beam
 ```
 
-### Filtered vector search and `k`
+Build the store, and the entity repository if you store named entities:
 
-`k` handed to a vector index is the HNSW **search beam width**, not merely a row count, and `where {}`
-predicates apply *after* the index yields. A metadata-filtered caller therefore receives roughly
-`k × selectivity` rows, drawn from the globally-nearest rather than the nearest in scope. Measured on a
-9k-vector, 1536-dim cosine index: a caller asking for 40 got back 25, holding only 25 of the true scoped
-top 40 — recall 0.625.
+```kotlin
+val gom = graphObjectManagerFactory.stateless("graph")
 
-`filtered-search-over-fetch` widens what the index is asked for while still returning `topK` rows, with
-the trim applied after the filter. At the default of 5 the same query returns 40/40 at recall 1.0.
+val store: GraphRagStore = GraphObjectManagerStore(
+    gom = gom,
+    persistenceManager = persistenceManager,
+    properties = properties,            // GraphRagServiceProperties
+    chunkerConfig = ContentChunker.Config(),
+    chunkTransformer = ChunkTransformer.NO_OP,
+    embeddingService = embeddingService,
+)
+store.provision()                       // indexes and constraints, idempotent
 
-- Only the **filtered** path over-fetches. Unfiltered search already returns `topK` of `topK`.
-- Set it to `1` to disable over-fetch entirely, which emits exactly what earlier versions did.
-  Values below `1` are refused at startup rather than treated as off — a typo'd `0` would otherwise
-  restore the diluted path silently.
-- Raise it for highly selective filters; the right value is data-dependent.
-- `max-filtered-search-k` bounds the cost, since the widened beam is re-ranked by exact similarity and
-  that reads the full embedding off every candidate. A `topK` at or above the ceiling does not
-  over-fetch rather than having its beam narrowed.
+val entities = GraphObjectManagerEntityRepository(
+    gom = gom,
+    properties = properties,
+    dataDictionary = dataDictionary,
+    embeddingService = embeddingService,
+    entitySchema = EntitySchemaProvisioner(persistenceManager, properties, { embeddingService }),
+)
+```
 
-The exact re-rank is Neo4j-only; FalkorDB and Memgraph over-fetch and trim by their own approximate
-score, so they gain row count but not ordering.
-
-`Neo4jVectorRecallSearchKTest` measures all of the above against exhaustive `vector.similarity.cosine`
-ground truth, and is the place to re-measure if the corpus or index configuration changes.
+The database is whichever one the datasource names. Nothing database-specific is passed in, so moving
+from one to another is a configuration change.
 
 ### Oracle
 
@@ -150,29 +111,7 @@ engines.
    time a manager speaks to the graph. `provision()` adds the indexes, with a trigger for each vector
    index. The user needs the privileges to create them.
 
-3. Build the store and the entity repository on the stateless object manager:
-
-   ```kotlin
-   val gom = graphObjectManagerFactory.stateless("graph")
-
-   val store = GraphObjectManagerStore(
-       gom = gom,
-       persistenceManager = persistenceManager,
-       properties = properties,
-       chunkerConfig = ContentChunker.Config(),
-       chunkTransformer = ChunkTransformer.NO_OP,
-       embeddingService = embeddingService,
-   )
-   store.provision()
-
-   val entities = GraphObjectManagerEntityRepository(
-       gom = gom,
-       properties = properties,
-       dataDictionary = dataDictionary,
-       embeddingService = embeddingService,
-       entitySchema = EntitySchemaProvisioner(persistenceManager, properties, { embeddingService }),
-   )
-   ```
+3. Build the store and the entity repository as above.
 
 What differs on Oracle:
 
@@ -187,11 +126,89 @@ What differs on Oracle:
 
 Drivine's README has the rest: how the graph is stored, connection pooling, and writing SQL by hand.
 
-### FalkorDB Notes
+### Filtered vector search and `k`
 
-- Unique constraints require the Redis command `GRAPH.CONSTRAINT CREATE`, which must be issued through the FalkorDB driver directly (not via Cypher).
-- The `vecf32()` wrapper is required around vector parameters in search queries (handled by Drivine).
-- Fulltext index creation supports one property at a time.
+`k` handed to a vector index is the HNSW **search beam width**, not merely a row count, and `where {}`
+predicates apply *after* the index yields. A metadata-filtered caller therefore receives roughly
+`k × selectivity` rows, drawn from the globally-nearest rather than the nearest in scope. Measured on a
+9k-vector, 1536-dim cosine index: a caller asking for 40 got back 25, holding only 25 of the true scoped
+top 40 — recall 0.625.
+
+`filtered-search-over-fetch` widens what the index is asked for while still returning `topK` rows, with
+the trim applied after the filter. At the default of 5 the same query returns 40/40 at recall 1.0.
+
+- Only the **filtered** path over-fetches. Unfiltered search already returns `topK` of `topK`.
+- Set it to `1` to disable over-fetch entirely, which emits exactly what earlier versions did.
+  Values below `1` are refused at startup rather than treated as off — a typo'd `0` would otherwise
+  restore the diluted path silently.
+- Raise it for highly selective filters; the right value is data-dependent.
+- `max-filtered-search-k` bounds the cost, since the widened beam is re-ranked by exact similarity and
+  that reads the full embedding off every candidate. A `topK` at or above the ceiling does not
+  over-fetch rather than having its beam narrowed.
+
+The exact re-rank is Neo4j-only; FalkorDB and Memgraph over-fetch and trim by their own approximate
+score, so they gain row count but not ordering.
+
+`Neo4jVectorRecallSearchKTest` measures all of the above against exhaustive `vector.similarity.cosine`
+ground truth, and is the place to re-measure if the corpus or index configuration changes.
+
+## How it works
+
+**`GraphRagStore`** is the interface a consumer injects: ingestion and chunking, vector and full-text
+search with metadata filters, context expansion, facets, `reembedAll`, and reading a document's
+outline and a section's chunks.
+
+**`GraphObjectManagerStore`** implements it on Drivine's `StatelessGraphObjectManager`. The content
+model is a set of `@NodeFragment`s (documents, sections, chunks) and `@GraphView`s (a chunk with its
+neighbours, a section with its parents, a document's whole tree). Drivine generates a typed query DSL
+from them at build time. Saving, deleting, vector search (`gom.loadNearest`), full-text search
+(`gom.loadMatching`) and walking the hierarchy are all calls on the object manager, so the store holds
+no Cypher or SQL of its own, apart from one lookup described [below](#working-on-the-store-object-manager-first).
+
+Supporting classes:
+
+- **`GraphObjectManagerEntityRepository`**: named entities and their relationships, on the object
+  manager, on every database.
+- **`EntitySchemaProvisioner`** and **`GraphProvisioner`**: create the vector, full-text and range
+  indexes and the unique constraints, through Drivine's schema managers. The entity indexes are rebuilt
+  when the embedding model changes width.
+- **`DrivineNativeFinder`**: loads any `@NodeFragment` or `@GraphView` type by id.
+- **`DrivineNamedEntityDataRepository`**: the entity repository in hand-written Cypher, for the Cypher
+  databases only.
+- **`CypherQueryTools`** and **`LogicalQueryResolver`**: tools that let an LLM run validated,
+  read-only Cypher, and named Cypher query files. Cypher databases only.
+
+### Drivine
+
+Drivine is why one store runs on four databases. A view says what to load, a chunk and what is
+related to it, and not how; Drivine writes the statement in each database's language: Cypher for Neo4j,
+FalkorDB and Memgraph, each in its own dialect, and SQL/PGQ over two tables for Oracle. Vector and
+full-text indexes differ more than queries do (procedures on Neo4j, Redis commands on FalkorDB, MAGE
+modules on Memgraph, a vector index and an Oracle Text index on Oracle) and Drivine creates and
+queries each of them the same way.
+
+Filtered vector search in the store is one call. `ChunkNodeQueryDsl` is generated from the `ChunkNode`
+fragment, so the filter is checked by the compiler:
+
+```kotlin
+val nearest: List<Scored<ChunkNode>> = gom.loadNearest(
+    ChunkNode::class.java, ChunkNodeQueryDsl.INSTANCE,
+    embeddingService.embed("how do I rotate a refresh token?").toList(),
+    topK = 10,
+    threshold = 0.7,
+) {
+    where { query.rootDocumentId eq documentId }
+}
+```
+
+That reads the chunk vector index on any of the four databases. The same call with no `where` is an
+unfiltered search, and `gom.loadMatching` is its full-text counterpart.
+
+It costs little. A load or a save is one statement and one round trip however many relationships it
+carries. [graph-bench](https://github.com/liberation-data/graph-bench) runs the same Drivine code on
+Neo4j, FalkorDB and Oracle over a graph of 1.1 million nodes and 4.5 million relationships, checks that
+they give the same answers, and compares their speed: loading an issue with its repository, author,
+assignees, topics and comments takes 1.5 to 3.5 ms on each of them.
 
 ## Working on the store: object manager first
 
