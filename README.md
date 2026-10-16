@@ -13,6 +13,18 @@ through [Drivine4j](https://github.com/liberation-data/drivine4j).
 | **Memgraph** | Needs the `memgraph/memgraph-mage` image, which has the vector and text search modules. |
 | **Oracle** ![New](https://img.shields.io/badge/NEW-ff3e00?style=flat-square) | Oracle Database 23ai or later. No Cypher: Drivine reads with SQL/PGQ and writes rows. Needs the JDBC driver and the full Oracle Free image for full-text search. See [Oracle](#oracle). |
 
+## See it running
+
+[Guide](https://github.com/embabel/guide) is a working reference: an Embabel agent that answers
+questions about Embabel from its documentation, with this store behind it on any of the four
+databases. [Embabel Hub](https://hub.embabel.com) is its official front end.
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=hY6ZFMIJdd4" target="_blank">
+    <img src="https://raw.githubusercontent.com/embabel/guide/main/guide-demo.png" alt="The Voice, The Word, and The Wheel" width="700">
+  </a>
+</p>
+
 ## Usage
 
 Add the dependency:
