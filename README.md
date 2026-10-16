@@ -16,14 +16,14 @@ This module provides a graph-database-backed implementation of the RAG pattern u
 
 ### Supported Databases
 
-| Feature | Neo4j | FalkorDB | Oracle |
-|---|---|---|---|
-| Vector index creation | `CREATE VECTOR INDEX` | `CREATE VECTOR INDEX` | `CREATE VECTOR INDEX … ORGANIZATION NEIGHBOR PARTITIONS`, over a table of embeddings beside the nodes |
-| Vector search | `db.index.vector.queryNodes` | `db.idx.vector.queryNodes` + `vecf32()` | `VECTOR_DISTANCE` + `FETCH APPROX FIRST n ROWS` |
-| Fulltext index | `CREATE FULLTEXT INDEX` | `db.idx.fulltext.createNodeIndex` | Oracle Text index, over a table of the indexed text beside the nodes |
-| Fulltext search | `db.index.fulltext.queryNodes` | `db.idx.fulltext.queryNodes` | `CONTAINS` |
-| Unique constraints | `CREATE CONSTRAINT` | `GRAPH.CONSTRAINT CREATE` (Redis) | `CREATE UNIQUE INDEX` |
-| Embedding storage | Node property | Node property | Node property, copied to the embeddings table by a trigger |
+| Feature | Neo4j | FalkorDB | Memgraph | Oracle ![New](https://img.shields.io/badge/NEW-ff3e00?style=flat-square) |
+|---|---|---|---|---|
+| Vector index creation | `CREATE VECTOR INDEX` | `CREATE VECTOR INDEX` | `CREATE VECTOR INDEX … WITH CONFIG` | `CREATE VECTOR INDEX … ORGANIZATION NEIGHBOR PARTITIONS`, over a table of embeddings beside the nodes |
+| Vector search | `db.index.vector.queryNodes` | `db.idx.vector.queryNodes` + `vecf32()` | `vector_search.search` | `VECTOR_DISTANCE` + `FETCH APPROX FIRST n ROWS` |
+| Fulltext index | `CREATE FULLTEXT INDEX` | `db.idx.fulltext.createNodeIndex` | `CREATE TEXT INDEX` | Oracle Text index, over a table of the indexed text beside the nodes |
+| Fulltext search | `db.index.fulltext.queryNodes` | `db.idx.fulltext.queryNodes` | `text_search.search_all` | `CONTAINS` |
+| Unique constraints | `CREATE CONSTRAINT` | `GRAPH.CONSTRAINT CREATE` (Redis) | `CREATE CONSTRAINT … IS UNIQUE` | `CREATE UNIQUE INDEX` |
+| Embedding storage | Node property | Node property | Node property | Node property, copied to the embeddings table by a trigger |
 
 Drivine writes all of these. For Oracle, see [Oracle](#oracle).
 
