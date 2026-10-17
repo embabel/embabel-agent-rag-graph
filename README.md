@@ -1,4 +1,10 @@
-# Embabel RAG Graph
+<a href="https://hub.embabel.com"><img align="left" src="https://raw.githubusercontent.com/embabel/guide/main/logo.png" width="240"></a>
+
+### **Embabel RAG Graph**
+
+![Build](https://github.com/embabel/embabel-agent-rag-graph/actions/workflows/maven.yml/badge.svg) [![Embabel](https://img.shields.io/badge/Embabel-Agent_Framework-6C3483?style=for-the-badge)](https://github.com/embabel/embabel-agent) ![Kotlin](https://img.shields.io/badge/kotlin-%237F52FF.svg?style=for-the-badge&logo=kotlin&logoColor=white) ![Spring](https://img.shields.io/badge/spring-%236DB33F.svg?style=for-the-badge&logo=spring&logoColor=white) ![Apache Maven](https://img.shields.io/badge/Apache%20Maven-C71A36?style=for-the-badge&logo=Apache%20Maven&logoColor=white)
+
+<br clear="left"/>
 
 A graph-backed RAG store for the Embabel Agent framework: documents, sections, chunks and named
 entities, with vector search, full-text search and context expansion. It runs on four databases
