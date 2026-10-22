@@ -7,7 +7,7 @@
 <br clear="left"/>
 
 A graph-backed RAG store for the Embabel Agent framework: documents, sections, chunks and named
-entities, with vector search, full-text search and context expansion. It runs on four databases
+entities, with vector search, full-text search and context expansion. It runs on five databases
 through [Drivine4j](https://github.com/liberation-data/drivine4j).
 
 ## Supported databases
@@ -18,11 +18,12 @@ through [Drivine4j](https://github.com/liberation-data/drivine4j).
 | **FalkorDB** | Fastest on most workloads in [graph-bench](https://github.com/liberation-data/graph-bench). Unique constraints are a Redis command and a full-text index covers one property; Drivine handles both. |
 | **Memgraph** | Needs the `memgraph/memgraph-mage` image, which has the vector and text search modules. |
 | **Oracle** ![New](https://img.shields.io/badge/NEW-ff3e00?style=flat-square) | Oracle Database 23ai or later. No Cypher: Drivine reads with SQL/PGQ and writes rows. Needs the JDBC driver and the full Oracle Free image for full-text search. See [Oracle](#oracle). |
+| **Postgres** ![New](https://img.shields.io/badge/NEW-ff3e00?style=flat-square) | Postgres 14 or later. No Cypher: Drivine reads and writes plain SQL over two tables. Needs the JDBC driver, and pgvector for vector search. See [Postgres](#postgres). |
 
 ## See it running
 
 [Guide](https://github.com/embabel/guide) is a working reference: an Embabel agent that answers
-questions about Embabel from its documentation, with this store behind it on any of the four
+questions about Embabel from its documentation, with this store behind it on any of these
 databases. [Embabel Hub](https://hub.embabel.com) is its official front end.
 
 <p align="center">
@@ -49,7 +50,7 @@ Configure a Drivine datasource and the RAG properties:
 database:
   datasources:
     graph:
-      type: NEO4J          # or FALKORDB, MEMGRAPH; for ORACLE see below
+      type: NEO4J          # or FALKORDB, MEMGRAPH; for ORACLE and POSTGRES see below
       host: localhost
       port: 7687
       user-name: neo4j
@@ -144,6 +145,56 @@ What differs on Oracle:
 
 Drivine's README has the rest: how the graph is stored, connection pooling, and writing SQL by hand.
 
+### Postgres
+
+Postgres 14 or later. Postgres does not speak Cypher: Drivine keeps the graph in two tables, the same
+ones as on Oracle, and reads and writes it in plain SQL. The store and the entity repository are the
+same classes as on the other engines.
+
+1. Add the JDBC driver. Drivine does not bring it:
+
+   ```xml
+   <dependency>
+       <groupId>org.postgresql</groupId>
+       <artifactId>postgresql</artifactId>
+   </dependency>
+   ```
+
+2. Point the datasource at the database:
+
+   ```yaml
+   database:
+     datasources:
+       graph:
+         type: POSTGRES
+         host: localhost
+         port: 5432                  # the default
+         database-name: app          # the database to connect to
+         user-name: app
+         password: secret
+         default-graph-path: drivine # names the graph's tables; this is the default
+   ```
+
+   Drivine makes the graph's tables the first time a manager speaks to the graph. `provision()` adds
+   the indexes, and the `vector` and `pg_trgm` extensions they need where the user may create them.
+
+3. Build the store and the entity repository as above.
+
+What differs on Postgres:
+
+- `DrivineNamedEntityDataRepository` throws `UnsupportedOperationException` when it is constructed over
+  a Postgres datasource: every statement in it is Cypher. Use `GraphObjectManagerEntityRepository`.
+- `CypherQueryTools` and `LogicalQueryResolver` run Cypher, so they do not apply.
+- Vector search needs pgvector, which the `pgvector/pgvector` images have. A vector index is an HNSW
+  index over the embeddings of the label's nodes that are of its dimension; a node embedded at another
+  dimension is left out of it.
+- A full-text index is a `pg_trgm` trigram index, which narrows a search to the nodes that hold its
+  words. A search sees its own transaction's writes.
+- Full-text scores count each term in the text, as on Oracle without Oracle Text, and are on a
+  different scale from Lucene's. A full-text score threshold tuned on Neo4j may cut differently, and
+  has not been measured on Postgres.
+- `reembedAll` over stored embeddings of mixed dimensions has not been verified on Postgres.
+
 ### Filtered vector search and `k`
 
 `k` handed to a vector index is the HNSW **search beam width**, not merely a row count, and `where {}`
@@ -198,11 +249,12 @@ Supporting classes:
 
 ### Drivine
 
-Drivine is why one store runs on four databases. A view says what to load, a chunk and what is
+Drivine is why one store runs on five databases. A view says what to load, a chunk and what is
 related to it, and not how; Drivine writes the statement in each database's language: Cypher for Neo4j,
-FalkorDB and Memgraph, each in its own dialect, and SQL/PGQ over two tables for Oracle. Vector and
-full-text indexes differ more than queries do (procedures on Neo4j, Redis commands on FalkorDB, MAGE
-modules on Memgraph, a vector index and an Oracle Text index on Oracle) and Drivine creates and
+FalkorDB and Memgraph, each in its own dialect, SQL/PGQ over two tables for Oracle, and plain SQL
+over the same two tables for Postgres. Vector and full-text indexes differ more than queries do
+(procedures on Neo4j, Redis commands on FalkorDB, MAGE modules on Memgraph, a vector index and an
+Oracle Text index on Oracle, pgvector and `pg_trgm` indexes on Postgres) and Drivine creates and
 queries each of them the same way.
 
 Filtered vector search in the store is one call. `ChunkNodeQueryDsl` is generated from the `ChunkNode`
@@ -219,7 +271,7 @@ val nearest: List<Scored<ChunkNode>> = gom.loadNearest(
 }
 ```
 
-That reads the chunk vector index on any of the four databases. The same call with no `where` is an
+That reads the chunk vector index on any of the five databases. The same call with no `where` is an
 unfiltered search, and `gom.loadMatching` is its full-text counterpart.
 
 It costs little. A load or a save is one statement and one round trip however many relationships it
@@ -232,7 +284,7 @@ assignees, topics and comments takes 1.5 to 3.5 ms on each of them.
 
 `GraphObjectManagerStore` reads and writes through Drivine's `StatelessGraphObjectManager`: `@NodeFragment`
 models, `@GraphView`s and the generated query DSL. Drivine writes the Cypher for the configured
-engine, so one model runs on Neo4j, FalkorDB, Memgraph and Oracle. A hand-written statement runs wherever
+engine, so one model runs on Neo4j, FalkorDB, Memgraph, Oracle and Postgres. A hand-written statement runs wherever
 its author tried it.
 
 - Express a new read or write as a fragment, a view or a DSL query first.
@@ -245,8 +297,8 @@ its author tried it.
   loaded chunk that is changed and written back is saved one at a time, as `reembedAll` does.
 
 One site in the store is still Cypher: the entity-to-chunk lookup, because the entity label is
-configuration and a fragment's labels are fixed at compile time. On Oracle it loads what the entity is
-related to through the object manager instead.
+configuration and a fragment's labels are fixed at compile time. On Oracle and Postgres it loads what
+the entity is related to through the object manager instead.
 
 ## Testing
 
@@ -256,11 +308,13 @@ Integration tests use Testcontainers (Neo4j by default; FalkorDB and Memgraph ar
 mvn test
 ```
 
-The Oracle tests are left out of a plain run, because the image is large. They start Oracle Free in a
-container:
+The Oracle and Postgres tests are part of a plain run. They start Oracle Free
+(`gvenzl/oracle-free:23-faststart`, which wants about 2 GB) and Postgres with pgvector
+(`pgvector/pgvector:pg17`) in containers. To run one engine's tests alone:
 
 ```bash
-ORACLE_TESTS=true mvn test -Dtest='Oracle*'
+mvn test -Dtest='Oracle*'
+mvn test -Dtest='Postgres*'
 ```
 
 ## License

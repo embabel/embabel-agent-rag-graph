@@ -24,6 +24,7 @@ import com.embabel.common.core.types.TextSimilaritySearchRequest
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import org.drivine.connection.DatabaseType
 import org.drivine.manager.PersistenceManager
 import org.drivine.query.QuerySpecification
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -56,6 +57,7 @@ class EntityFullTextRequiredTermsTest {
         results: (String) -> List<SimilarityResult<NamedEntityData>>,
     ): DrivineNamedEntityDataRepository {
         val pm = mockk<PersistenceManager>(relaxed = true)
+        every { pm.type } returns DatabaseType.NEO4J
         val spec = slot<QuerySpecification<SimilarityResult<NamedEntityData>>>()
         every { pm.query(capture(spec)) } answers {
             val searchText = spec.captured.parameters["searchText"] as String

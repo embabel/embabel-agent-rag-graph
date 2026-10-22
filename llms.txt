@@ -1,15 +1,15 @@
 # Embabel RAG Graph
 
 > Graph-backed RAG for the Embabel Agent Framework: chunk, section and document storage with vector
-> and full-text search on Neo4j, FalkorDB, Memgraph and Oracle, through Drivine.
+> and full-text search on Neo4j, FalkorDB, Memgraph, Oracle and Postgres, through Drivine.
 
 ## Rules for changing this code
 
 - Go through Drivine's `StatelessGraphObjectManager` first: `@NodeFragment` models, `@GraphView`s and
   the generated query DSL (`gom.loadAll`, `gom.saveAll`, `gom.delete`). Drivine writes the Cypher for
-  the configured engine, and SQL/PGQ on Oracle, so the same model runs on Neo4j, FalkorDB, Memgraph
-  and Oracle.
-- Oracle does not run Cypher. A hand-written Cypher statement needs another way there, through the
+  the configured engine, SQL/PGQ on Oracle and plain SQL on Postgres, so the same model runs on Neo4j,
+  FalkorDB, Memgraph, Oracle and Postgres.
+- Oracle and Postgres do not run Cypher. A hand-written Cypher statement needs another way there, through the
   object manager.
 - A chunk loaded from the store carries a stamp (`@NodeStamp`). To change a loaded chunk and write it
   back, use `gom.save`, which is refused when the chunk changed meanwhile. `saveAll` does not compare
@@ -22,12 +22,12 @@
 - Order by a property only with a range index that mirrors the ordering. Drivine's index advisor
   warns when none does.
 - Put each `@NodeFragment` and `@GraphView` in its own file under `graph/model`.
-- A change must pass on all four engines. The cross-engine suite is
-  `AbstractRagSearchCharacterizationTest` and its Neo4j, FalkorDB, Memgraph and Oracle subclasses.
-  The Oracle ones run with `ORACLE_TESTS=true mvn test -Dtest='Oracle*'`.
+- A change must pass on all five engines. The cross-engine suite is
+  `AbstractRagSearchCharacterizationTest` and its Neo4j, FalkorDB, Memgraph, Oracle and Postgres
+  subclasses. The Oracle and Postgres ones run in a plain `mvn test`.
 
 ## Where things are
 
-- [README](README.md): supported databases, usage (with Oracle), how the store works, and testing.
+- [README](README.md): supported databases, usage (with Oracle and Postgres), how the store works, and testing.
 - `src/main/kotlin/com/embabel/agent/rag/graph/GraphObjectManagerStore.kt`: the store.
 - `src/main/kotlin/com/embabel/agent/rag/graph/model/`: fragments and views.

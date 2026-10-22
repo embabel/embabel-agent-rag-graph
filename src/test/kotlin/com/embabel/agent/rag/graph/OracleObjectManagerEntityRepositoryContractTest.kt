@@ -37,11 +37,9 @@ import org.springframework.context.annotation.Profile
 import org.springframework.test.context.ActiveProfiles
 import org.drivine.test.OracleCypherFixtures
 import org.drivine.test.OracleTestContainer
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 
 /** The entity contract, held against [GraphObjectManagerEntityRepository] on Oracle. */
 @SpringBootTest(classes = [OracleObjectManagerEntityRepositoryContractTest.Config::class])
-@EnabledIfEnvironmentVariable(named = "ORACLE_TESTS", matches = "true")
 @ActiveProfiles("oracle")
 class OracleObjectManagerEntityRepositoryContractTest : AbstractNamedEntityRepositoryContractTest() {
 
