@@ -47,6 +47,7 @@ interface RagStoreUnderTest {
     fun chunksOf(sectionId: String): List<Chunk>
     fun deleteRootAndDescendants(uri: String): DocumentDeletionResult?
     fun expandResult(id: String, method: ResultExpander.Method, elementsToAdd: Int): List<ContentElement>
+    fun findChunksForEntity(entityId: String): List<Chunk>
 }
 
 /** Adapts the [StatelessGraphObjectManager][org.drivine.manager.GraphObjectManager]-backed store to [RagStoreUnderTest]. */
@@ -70,4 +71,6 @@ class GomRagStoreAdapter(private val store: GraphObjectManagerStore) : RagStoreU
         method: ResultExpander.Method,
         elementsToAdd: Int,
     ): List<ContentElement> = store.expandResult(id, method, elementsToAdd)
+
+    override fun findChunksForEntity(entityId: String): List<Chunk> = store.findChunksForEntity(entityId)
 }
