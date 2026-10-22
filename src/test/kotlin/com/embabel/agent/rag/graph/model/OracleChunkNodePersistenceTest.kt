@@ -36,10 +36,8 @@ import org.springframework.context.annotation.Profile
 import org.springframework.test.context.ActiveProfiles
 import org.drivine.test.OracleCypherFixtures
 import org.drivine.test.OracleTestContainer
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 
 @SpringBootTest(classes = [OracleChunkNodePersistenceTest.Config::class])
-@EnabledIfEnvironmentVariable(named = "ORACLE_TESTS", matches = "true")
 @ActiveProfiles("oracle")
 class OracleChunkNodePersistenceTest : AbstractChunkNodePersistenceTest() {
 

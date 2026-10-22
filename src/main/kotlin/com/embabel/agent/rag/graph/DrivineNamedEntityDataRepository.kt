@@ -36,7 +36,6 @@ import com.embabel.common.core.types.TextSimilaritySearchRequest
 import com.embabel.common.util.loggerFor
 import tools.jackson.databind.ObjectMapper
 import tools.jackson.module.kotlin.jacksonObjectMapper
-import org.drivine.connection.DatabaseType
 import org.drivine.manager.StatelessGraphObjectManager
 import org.drivine.manager.PersistenceManager
 import org.drivine.mapper.RowMapper
@@ -118,10 +117,10 @@ data class DrivineNamedEntityDataRepository @JvmOverloads constructor(
     private val logger = loggerFor<DrivineNamedEntityDataRepository>()
 
     init {
-        // Every statement of this repository is Cypher, written by hand. Oracle speaks SQL.
-        if (persistenceManager.type == DatabaseType.ORACLE) {
+        // Every statement of this repository is Cypher, written by hand. Oracle and Postgres speak SQL.
+        if (!persistenceManager.type.speaksCypher) {
             throw UnsupportedOperationException(
-                "DrivineNamedEntityDataRepository writes Cypher, which Oracle does not speak. Use GraphObjectManagerEntityRepository."
+                "DrivineNamedEntityDataRepository writes Cypher, which ${persistenceManager.type} does not speak. Use GraphObjectManagerEntityRepository."
             )
         }
     }

@@ -73,7 +73,6 @@ import com.embabel.common.core.types.SimilarityResult
 import com.embabel.common.core.types.TextSimilaritySearchRequest
 import org.drivine.StaleObjectException
 import org.drivine.annotation.Direction
-import org.drivine.connection.DatabaseType
 import org.drivine.manager.CascadeType
 import org.drivine.manager.NodeRef
 import org.drivine.manager.StatelessGraphObjectManager
@@ -684,8 +683,8 @@ class GraphObjectManagerStore(
 
     // Entity → chunk is a relationship traversal — kept as Cypher; entities are not modelled yet.
     override fun findChunksForEntity(entityId: String): List<Chunk> {
-        // Oracle does not speak Cypher: there the chunks are loaded as what the entity is related to.
-        if (persistenceManager.type == DatabaseType.ORACLE) {
+        // Oracle and Postgres do not speak Cypher: there the chunks are loaded as what the entity is related to.
+        if (!persistenceManager.type.speaksCypher) {
             val chunks = gom.edges.loadRelated(NodeRef(EntityNode::class.java, entityId), "HAS_ENTITY", Direction.INCOMING, ChunkNode::class.java)
             return findAllChunksById(chunks.map { it.id }).toList()
         }
