@@ -15,12 +15,16 @@
  */
 package com.embabel.agent.rag.graph
 
+import com.embabel.agent.rag.graph.model.ChunkNode
+import com.embabel.agent.rag.graph.model.EntityNode
 import com.embabel.agent.rag.model.Chunk
 import com.embabel.agent.rag.model.DefaultMaterializedContainerSection
 import com.embabel.agent.rag.model.LeafSection
 import com.embabel.agent.rag.model.MaterializedDocument
 import com.embabel.agent.rag.service.ResultExpander
 import com.embabel.common.core.types.SimilarityResult
+import org.drivine.manager.GraphObjectManagerFactory
+import org.drivine.manager.NodeRef
 import org.drivine.manager.PersistenceManager
 import org.drivine.query.QuerySpecification
 import org.junit.jupiter.api.AfterEach
@@ -29,6 +33,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Autowired
 import java.util.UUID
 
 /**
@@ -68,6 +73,10 @@ abstract class AbstractRagSearchCharacterizationTest {
      * Memgraph leaves the index holding only live nodes — the approach Drivine's own suite uses.
      */
     protected open val cleansUpByDeletion: Boolean = true
+
+    /** Seeds what the store never writes itself, such as a chunk's `HAS_ENTITY` edge. */
+    @Autowired
+    private lateinit var gomFactory: GraphObjectManagerFactory
 
     private val trackedNodeIds = mutableListOf<String>()
 
@@ -290,6 +299,21 @@ abstract class AbstractRagSearchCharacterizationTest {
         assertTrue(store.outline(doc.uri).isEmpty(), "[$engineName] no sections left")
         assertEquals(kept.map { it.id }, store.findAllChunksById(kept.map { it.id }).map { it.id }, "[$engineName] the other document is untouched")
         assertEquals(null, store.deleteRootAndDescendants(doc.uri), "[$engineName] a second delete finds nothing")
+    }
+
+    // The store never writes HAS_ENTITY, so the edge is seeded. Cypher engines read it with a Cypher
+    // statement, Oracle and Postgres through the object manager: the two branches of findChunksForEntity.
+    @Test
+    fun `findChunksForEntity returns the chunks related to the entity`() {
+        val chunk = seedDocument("A chunk that mentions an entity.").first()
+        val entityId = UUID.randomUUID().toString()
+        track(entityId)
+        val gom = gomFactory.stateless("graph")
+        gom.save(EntityNode(id = entityId, name = "Entity"))
+        gom.edges.relate(NodeRef(ChunkNode::class.java, chunk.id), NodeRef(EntityNode::class.java, entityId), "HAS_ENTITY")
+
+        assertEquals(listOf(chunk.id), store.findChunksForEntity(entityId).map { it.id }, "[$engineName] the related chunk")
+        assertTrue(store.findChunksForEntity(UUID.randomUUID().toString()).isEmpty(), "[$engineName] an unknown entity has none")
     }
 
     @Test
