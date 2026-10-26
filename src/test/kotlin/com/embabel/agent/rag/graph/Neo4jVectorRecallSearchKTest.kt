@@ -70,15 +70,15 @@ import kotlin.random.Random
  *
  * ## Isolation
  *
- * The probe owns its label and its index, and deliberately does NOT carry the `Chunk` label: other
- * suites' `reembedAll` drops and recreates the shared chunk vector index mid-run, which would look
- * like a recall failure here, and 9k probe vectors in the shared index would perturb those suites in
- * turn.
+ * The probe owns its index, on its own `RecallProbe` label, and `partitionLabel` (drivine 0.0.79) aims
+ * the read at that index at runtime. Other suites' `reembedAll` drops and recreates the shared chunk
+ * vector index, which would look like a recall failure here, so the probe never reads through it.
  *
- * That is possible because a vector search does not re-`MATCH` the fragment's label —
- * `FragmentVectorSearchBuilder` projects whatever node the index `CALL` yields. So a `RecallProbe`
- * node carrying `ChunkNode`'s properties projects as a `ChunkNode`, and `partitionLabel` (drivine
- * 0.0.79) aims the read at this probe's own index at runtime.
+ * Each probe node also carries `ChunkNode`'s labels, `Chunk` and the `ContentElement` it inherits.
+ * Since Drivine 0.3.0 a search through a partition returns only the nodes that carry the fragment's
+ * labels (liberation-data/drivine4j#247), so a node with `RecallProbe` alone is left out. Suites run
+ * one class at a time, and the probe deletes its nodes when it finishes, so the other suites never
+ * see them.
  *
  * The index name is not free: `partitionLabel` re-derives it as `${label}_${property}_vector`, which
  * is exactly `VectorIndexSpec.defaultName()`. Hence `RecallProbe_embedding_vector`.
@@ -184,7 +184,7 @@ class Neo4jVectorRecallSearchKTest {
                 QuerySpecification.withStatement(
                     """
                     UNWIND ${'$'}rows AS r
-                    CREATE (n:$LABEL {
+                    CREATE (n:$LABEL:Chunk:ContentElement {
                         id: r.id, text: r.text, urtext: r.urtext, parentId: r.parentId,
                         embedding: r.embedding, `metadata.tenant`: r.tenant
                     })
@@ -315,8 +315,7 @@ class Neo4jVectorRecallSearchKTest {
     fun `the metadata property bag survives a vector search`() {
         val viaSearch = gom.loadNearest(ChunkNode::class.java, queryVector, 1, null, null, LABEL).single().value
 
-        // On-disk truth. `load` cannot be the control here: it emits MATCH (n:Chunk {id: …}) and the
-        // probe deliberately carries no Chunk label.
+        // On-disk truth, read with plain Cypher rather than through the object manager under test.
         val onDisk = pm.query(
             QuerySpecification.withStatement(
                 "MATCH (n:$LABEL {id: ${'$'}id}) RETURN n.`metadata.tenant` AS t",
