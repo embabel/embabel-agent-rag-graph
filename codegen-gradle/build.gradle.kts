@@ -19,7 +19,7 @@ version = "0.3.0-SNAPSHOT"
 // Versions come from the Maven build via -P properties (see the exec-maven-plugin in the pom), so the
 // pom is the single source of truth and the KSP DSL is generated against the *same* versions it's later
 // compiled against. The fallbacks keep a standalone `./gradlew kspKotlin` working.
-val drivineVersion = (findProperty("drivineVersion") as String?) ?: "0.0.73"
+val drivineVersion = (findProperty("drivineVersion") as String?) ?: "0.4.0"
 val embabelAgentVersion = (findProperty("embabelAgentVersion") as String?) ?: "1.5.0-SNAPSHOT"
 
 repositories {
