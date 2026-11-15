@@ -104,6 +104,9 @@ private const val REEMBED_BATCH_SIZE = 256
 /** How many times a window is loaded and re-embedded when a chunk in it changes meanwhile. */
 private const val REEMBED_WINDOW_ATTEMPTS = 3
 
+/** The label every document, section and chunk carries ([com.embabel.agent.rag.graph.model.ContentElementNode]). */
+private const val CONTENT_ELEMENT_LABEL = "ContentElement"
+
 /**
  * A threshold above this requires a raw full-text score above [FULL_TEXT_BM25_K] — already
  * a strong match. Empty results above it are far more likely a mis-set threshold than an empty corpus.
@@ -212,12 +215,26 @@ class GraphObjectManagerStore(
     private val chunkFullTextIndex = FullTextIndexSpec(properties.chunkNodeName, listOf("text"))
 
     // Mirrors outline's `where` and `orderBy`, so a document's sections are read off the index in order.
-    private val sectionOrderIndex = RangeIndexSpec("ContentElement", listOf("root_document_id", "ordinal"))
+    private val sectionOrderIndex = RangeIndexSpec(CONTENT_ELEMENT_LABEL, listOf("root_document_id", "ordinal"))
 
     // What chunksOf looks a section's chunks up by: the leaf they were cut from, or the section holding them.
     private val chunkSectionIndexes = listOf(
         RangeIndexSpec(properties.chunkNodeName, listOf("leaf_section_id")),
         RangeIndexSpec(properties.chunkNodeName, listOf("container_section_id")),
+    )
+
+    /*
+     * What every save, parent link and next-chunk link finds its nodes by. Each is a
+     * `MERGE (n:<labels> {id: …})` or a `MATCH` of the same shape: a document, a section and a chunk all
+     * carry `ContentElement`, while the next-chunk link names `Chunk` alone ([ChunkPlaceFragment]).
+     * Without these, every one of those statements scans its label, so writing one document costs the
+     * size of the whole store, once per section, chunk and link — and on an engine that holds its write
+     * lock for a statement, every reader waits out each scan. A range index rather than a uniqueness
+     * constraint: it asks nothing of what a store already holds, so it cannot fail at startup.
+     */
+    private val contentElementIdIndexes = listOf(
+        RangeIndexSpec(CONTENT_ELEMENT_LABEL, listOf("id")),
+        RangeIndexSpec(properties.chunkNodeName, listOf("id")),
     )
 
     private val provisioner = GraphProvisioner(persistenceManager)
@@ -228,7 +245,7 @@ class GraphObjectManagerStore(
             vectorIndexes = listOf(chunkVectorIndex),
             fullTextIndexes = listOf(chunkFullTextIndex),
             constraints = listOf(UniquenessConstraintSpec(properties.entityNodeName, "id")),
-            rangeIndexes = listOf(sectionOrderIndex) + chunkSectionIndexes,
+            rangeIndexes = contentElementIdIndexes + sectionOrderIndex + chunkSectionIndexes,
         )
         logger.info("Provisioning complete")
     }
