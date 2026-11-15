@@ -21,6 +21,7 @@ version = "0.3.0-SNAPSHOT"
 // compiled against. The fallbacks keep a standalone `./gradlew kspKotlin` working.
 val drivineVersion = (findProperty("drivineVersion") as String?) ?: "0.5.0"
 val embabelAgentVersion = (findProperty("embabelAgentVersion") as String?) ?: "1.5.0-SNAPSHOT"
+val guavaVersion = (findProperty("guavaVersion") as String?) ?: "33.7.2-jre"
 
 repositories {
     // mavenLocal first is deliberate — it mirrors Maven's local-m2-first resolution, so this codegen and
@@ -34,6 +35,10 @@ repositories {
 }
 
 dependencies {
+    constraints {
+        implementation("com.google.guava:guava:$guavaVersion")
+    }
+
     implementation("org.drivine:drivine4j:$drivineVersion")
     ksp("org.drivine:drivine4j-codegen:$drivineVersion")
 
