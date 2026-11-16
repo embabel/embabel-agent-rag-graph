@@ -79,7 +79,13 @@ class GraphProvisioner(
     private fun ensureUnderConventionName(spec: IndexSpec, rebuildAtAnotherWidth: Boolean) {
         when (val result = persistenceManager.indexes.ensure(spec)) {
             is EnsureResult.AlreadyMatching ->
-                if (result.info.name != spec.effectiveName) {
+                /*
+                 * Only an index read by NAME needs the convention name: a vector or full-text search. A range
+                 * index is chosen by the planner from its label and properties, so any index on them serves —
+                 * and the one already there may belong to a uniqueness constraint (`Chunk(id)`), which cannot
+                 * be dropped, so recreating it failed provisioning outright.
+                 */
+                if (spec !is RangeIndexSpec && result.info.name != spec.effectiveName) {
                     logger.info(
                         "Index on {}{} exists as '{}' but this store resolves '{}' — recreating under the convention name",
                         spec.label, spec.properties, result.info.name, spec.effectiveName,
