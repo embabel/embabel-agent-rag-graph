@@ -88,6 +88,7 @@ import org.drivine.query.dsl.instanceOf
 import org.drivine.query.dsl.query
 import org.drivine.schema.FullTextIndexSpec
 import org.drivine.schema.RangeIndexSpec
+import org.drivine.schema.SchemaCatalog
 import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
@@ -106,6 +107,24 @@ private const val REEMBED_WINDOW_ATTEMPTS = 3
 
 /** The label every document, section and chunk carries ([com.embabel.agent.rag.graph.model.ContentElementNode]). */
 private const val CONTENT_ELEMENT_LABEL = "ContentElement"
+
+/**
+ * The fragments every save, parent link and next-chunk link finds its nodes by. Each is a
+ * `MERGE (n:<labels> {id: …})` or a `MATCH` of the same shape: a document, a section and a chunk all
+ * carry `ContentElement` ([ContentElementFragment]), while the next-chunk link names `Chunk` alone
+ * ([ChunkPlaceFragment]). Each declares its id `@RangeIndex`, beside its `@NodeId`, so the model is the
+ * one place the index is stated.
+ *
+ * Without those indexes every one of those statements scans its label, so writing one document costs the
+ * size of the whole store, once per section, chunk and link — and on an engine that holds its write lock
+ * for a statement, every reader waits out each scan. A range index rather than a uniqueness constraint:
+ * it asks nothing of what a store already holds, so it cannot fail at startup.
+ */
+internal val CONTENT_ID_FRAGMENTS = listOf(ContentElementFragment::class, ChunkPlaceFragment::class)
+
+/** The range indexes [CONTENT_ID_FRAGMENTS] declare, read off their annotations. */
+internal fun contentIdIndexes(): List<RangeIndexSpec> =
+    SchemaCatalog.fromFragments(*CONTENT_ID_FRAGMENTS.toTypedArray()).indexes.filterIsInstance<RangeIndexSpec>()
 
 /**
  * A threshold above this requires a raw full-text score above [FULL_TEXT_BM25_K] — already
@@ -224,18 +243,11 @@ class GraphObjectManagerStore(
     )
 
     /*
-     * What every save, parent link and next-chunk link finds its nodes by. Each is a
-     * `MERGE (n:<labels> {id: …})` or a `MATCH` of the same shape: a document, a section and a chunk all
-     * carry `ContentElement`, while the next-chunk link names `Chunk` alone ([ChunkPlaceFragment]).
-     * Without these, every one of those statements scans its label, so writing one document costs the
-     * size of the whole store, once per section, chunk and link — and on an engine that holds its write
-     * lock for a statement, every reader waits out each scan. A range index rather than a uniqueness
-     * constraint: it asks nothing of what a store already holds, so it cannot fail at startup.
+     * What every save, parent link and next-chunk link finds its nodes by, declared on the model as
+     * `@NodeId @RangeIndex` on the fragments those statements name ([CONTENT_ID_FRAGMENTS]). Their labels
+     * are the fragments' own; the chunk one equals `properties.chunkNodeName`, which `init` pins to it.
      */
-    private val contentElementIdIndexes = listOf(
-        RangeIndexSpec(CONTENT_ELEMENT_LABEL, listOf("id")),
-        RangeIndexSpec(properties.chunkNodeName, listOf("id")),
-    )
+    private val contentElementIdIndexes = contentIdIndexes()
 
     private val provisioner = GraphProvisioner(persistenceManager)
 

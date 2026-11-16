@@ -18,14 +18,18 @@ package com.embabel.agent.rag.graph.model
 import org.drivine.annotation.GraphProperty
 import org.drivine.annotation.NodeFragment
 import org.drivine.annotation.NodeId
+import org.drivine.annotation.RangeIndex
 
 /**
  * Where a chunk sits, and nothing else: enough to link it to its parent and to the chunk after it
  * without loading its text or its vector.
+ *
+ * Its `id` is range-indexed because the next-chunk link MATCHes both chunks by it under `Chunk` alone,
+ * which the `ContentElement` index does not serve. The store provisions this index from the annotation.
  */
 @NodeFragment(labels = ["Chunk"])
 data class ChunkPlaceFragment(
-    @NodeId val id: String,
+    @NodeId @RangeIndex val id: String,
     val parentId: String? = null,
     @GraphProperty("root_document_id") val rootDocumentId: String? = null,
     @GraphProperty("container_section_id") val containerSectionId: String? = null,
