@@ -20,6 +20,8 @@
     <properties>
         <embabel-agent.version>1.5.3</embabel-agent.version>
         <drivine.version>0.5.0</drivine.version>
+        <!-- GHSA-xxph-c9ww-hj94: keep Maven and Gradle codegen on patched Guava. -->
+        <guava.version>33.7.2-jre</guava.version>
         <!-- Overrides the parent's default: the Drivine KSP-generated DSL uses context parameters
              (Kotlin 2.2+), so this module and its codegen-gradle build compile with 2.3.21. -->
         <kotlin.version>2.3.21</kotlin.version>
@@ -52,6 +54,12 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
+            </dependency>
+
             <!-- jfalkordb 0.13.0 (through Drivine) needs Jedis 8; the imported BOM manages an older one.
                  Declared first, so it wins over the import. -->
             <dependency>
@@ -209,6 +217,7 @@
                                 <argument>kspKotlin</argument>
                                 <argument>-PdrivineVersion=${drivine.version}</argument>
                                 <argument>-PembabelAgentVersion=${embabel-agent.version}</argument>
+                                <argument>-PguavaVersion=${guava.version}</argument>
                                 <argument>--quiet</argument>
                             </arguments>
                         </configuration>
