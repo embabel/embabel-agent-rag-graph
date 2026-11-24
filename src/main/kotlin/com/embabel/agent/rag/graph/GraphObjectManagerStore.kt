@@ -56,8 +56,8 @@ import com.embabel.agent.rag.model.ContentRoot
 import com.embabel.agent.rag.model.LeafSection
 import com.embabel.agent.rag.model.MaterializedDocument
 import com.embabel.agent.rag.model.NavigableDocument
-import com.embabel.agent.rag.model.NavigableSection
 import com.embabel.agent.rag.model.Retrievable
+import com.embabel.agent.rag.model.SectionPlace
 import com.embabel.agent.rag.service.RagRequest
 import com.embabel.agent.rag.service.support.FunctionRagFacet
 import com.embabel.agent.rag.service.support.RagFacet
@@ -742,11 +742,9 @@ class GraphObjectManagerStore(
     )
 
     override fun createInternalRelationships(root: NavigableDocument) {
-        val sections = readingOrder(root, depth = 1)
         val chunks = gom.loadAll<ChunkPlaceFragment> { where { query.rootDocumentId eq root.id } }
-        linkToParents(sections, chunks)
+        linkToParents(root.sectionsInReadingOrder(), chunks)
         linkConsecutiveChunks(chunks)
-        stampReadingOrder(root, sections)
     }
 
     /**
@@ -754,7 +752,7 @@ class GraphObjectManagerStore(
      * hierarchy [ZoomOutView] and the recursive tree views walk. Only this document's elements, so
      * ingesting one document costs its own size and not the graph's.
      */
-    private fun linkToParents(sections: List<PlacedSection>, chunks: List<ChunkPlaceFragment>) {
+    private fun linkToParents(sections: List<SectionPlace>, chunks: List<ChunkPlaceFragment>) {
         val parentIds = sections.map { it.section.id to it.section.parentId } + chunks.map { it.id to it.parentId }
         val links = parentIds.mapNotNull { (id, parentId) ->
             parentId?.let { ParentLinkView(ContentElementFragment(id), ContentElementFragment(it)) }
@@ -776,40 +774,34 @@ class GraphObjectManagerStore(
     }
 
     /**
-     * Number every section of [root] in reading order — a section before the sections inside it,
-     * and those before its next sibling — and say which document it belongs to. Nothing else
-     * records either: `HAS_PARENT` says what a section belongs to, not where it comes, and a
-     * chunk's `sequence_number` restarts in each container.
-     *
-     * TODO(https://github.com/embabel/embabel-agent/issues/2110): this is every section's SECOND
-     * save. `writeAndChunkDocument` is final in embabel-agent and has already called [save] on each
-     * section, one at a time and with no position, before it hands the tree to
-     * [createInternalRelationships]. The cost is one extra write per section at ingest; nothing is
-     * wrong in what is stored. When embabel-agent lets a store save a document's structure in one
-     * step, save the sections ONCE there, with their place, and delete this function along with
-     * the per-section branches of [save] it makes redundant.
+     * The document and every section of it, each section written ONCE with its place: its number in
+     * reading order (a section before the sections inside it, and those before its next sibling), its
+     * depth, and the document it belongs to. Nothing else records either: `HAS_PARENT` says what a
+     * section belongs to, not where it comes, and a chunk's `sequence_number` restarts in each container.
+     * One write for the root and one for each kind of section, where the default saved every section
+     * alone and this store then saved each a second time to place it.
      */
-    private fun stampReadingOrder(root: NavigableDocument, sections: List<PlacedSection>) {
-        logger.debug("Stamping reading order on {} sections of '{}'", sections.size, root.uri)
-        val placed = sections.mapIndexedNotNull { index, (section, depth) ->
+    override fun saveStructure(root: NavigableDocument, sections: List<SectionPlace>) {
+        save(root)
+        val placed = sections.mapNotNull { (section, ordinal, depth) ->
             when (section) {
                 is LeafSection ->
-                    LeafSectionNode.from(section).copy(rootDocumentId = root.id, ordinal = index.toLong(), depth = depth)
+                    LeafSectionNode.from(section).copy(rootDocumentId = root.id, ordinal = ordinal.toLong(), depth = depth.toLong())
                 is ContainerSection ->
-                    ContainerSectionNode.from(section).copy(rootDocumentId = root.id, ordinal = index.toLong(), depth = depth)
-                else -> null.also { logger.warn("No model for section {} ({}); it gets no place", section.id, section::class.simpleName) }
+                    ContainerSectionNode.from(section).copy(rootDocumentId = root.id, ordinal = ordinal.toLong(), depth = depth.toLong())
+                else -> null.also { logger.warn("No model for section {} ({}); it is not saved", section.id, section::class.simpleName) }
             }
         }
-        gom.saveAll(placed.filterIsInstance<LeafSectionNode>())
-        gom.saveAll(placed.filterIsInstance<ContainerSectionNode>())
+        placed.filterIsInstance<LeafSectionNode>().takeIf { it.isNotEmpty() }?.let(gom::saveAll)
+        placed.filterIsInstance<ContainerSectionNode>().takeIf { it.isNotEmpty() }?.let(gom::saveAll)
     }
 
-    private data class PlacedSection(val section: NavigableSection, val depth: Long)
-
-    // NavigableContainerSection.descendants() yields a container's children before any grandchild,
-    // which is level order, not the order the document reads in.
-    private fun readingOrder(section: NavigableSection, depth: Long): List<PlacedSection> =
-        section.children.flatMap { listOf(PlacedSection(it, depth)) + readingOrder(it, depth + 1) }
+    /**
+     * Nothing here: [persistChunksWithEmbeddings] writes every chunk whole, with its vector or without
+     * one, as [onNewRetrievables] hands it each chunk of the document. Saving them here as well wrote
+     * every chunk twice.
+     */
+    override fun saveChunks(chunks: List<Chunk>) {}
 
     override fun outline(uri: String, skip: Int, limit: Int?): List<DocumentSection> {
         val root = findContentRootByUri(uri) ?: return emptyList()
